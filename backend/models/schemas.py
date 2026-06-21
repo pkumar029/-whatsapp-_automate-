@@ -1,0 +1,227 @@
+"""
+Pydantic Schemas for Request/Response validation
+"""
+from datetime import datetime
+from typing import Optional, List, Any, Dict
+from pydantic import BaseModel, EmailStr, field_validator
+import re
+
+
+# ─── Contact Schemas ──────────────────────────────────────────
+class ContactCreate(BaseModel):
+    name: str
+    phone: str
+    email: Optional[str] = None
+    notes: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v):
+        cleaned = re.sub(r'[\s\-\(\)]', '', v)
+        if not re.match(r'^\+?[0-9]{7,15}$', cleaned):
+            raise ValueError('Invalid phone number format')
+        return cleaned
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        if len(v.strip()) < 1:
+            raise ValueError('Name cannot be empty')
+        return v.strip()
+
+
+class ContactUpdate(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    notes: Optional[str] = None
+    tags: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
+
+class ContactResponse(BaseModel):
+    id: int
+    name: str
+    phone: str
+    email: Optional[str]
+    notes: Optional[str]
+    tags: Optional[List[str]]
+    is_active: bool
+    is_blocked: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ContactListResponse(BaseModel):
+    contacts: List[ContactResponse]
+    total: int
+    page: int
+    limit: int
+
+
+# ─── Message Schemas ──────────────────────────────────────────
+class MessageSend(BaseModel):
+    contact_id: Optional[int] = None
+    phone: Optional[str] = None
+    message: str
+
+    @field_validator('message')
+    @classmethod
+    def validate_message(cls, v):
+        if not v.strip():
+            raise ValueError('Message cannot be empty')
+        if len(v) > 4096:
+            raise ValueError('Message too long (max 4096 characters)')
+        return v
+
+
+class MessageResponse(BaseModel):
+    id: int
+    contact_id: Optional[int]
+    phone: str
+    direction: str
+    content: str
+    status: str
+    contact_name: Optional[str] = None
+    error_message: Optional[str]
+    sent_at: Optional[datetime]
+    delivered_at: Optional[datetime]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class MessageListResponse(BaseModel):
+    messages: List[MessageResponse]
+    total: int
+    page: int
+    limit: int
+
+
+# ─── Automation Schemas ───────────────────────────────────────
+class StepSchema(BaseModel):
+    id: Optional[int] = None
+    step_type: str
+    step_order: Optional[int] = None
+    name: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = True
+
+
+class AutomationCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    trigger_type: str = "manual"
+    trigger_config: Optional[Dict[str, Any]] = None
+    steps: Optional[List[StepSchema]] = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        if len(v.strip()) < 2:
+            raise ValueError('Name must be at least 2 characters')
+        return v.strip()
+
+
+class AutomationUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    trigger_type: Optional[str] = None
+    trigger_config: Optional[Dict[str, Any]] = None
+    steps: Optional[List[StepSchema]] = None
+
+
+class AutomationResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    trigger_type: str
+    trigger_config: Optional[Dict[str, Any]]
+    is_active: bool
+    run_count: int
+    last_run: Optional[datetime]
+    step_count: Optional[int] = 0
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AutomationListResponse(BaseModel):
+    automations: List[AutomationResponse]
+    total: int
+
+
+# ─── Log Schemas ──────────────────────────────────────────────
+class LogResponse(BaseModel):
+    id: int
+    automation_id: int
+    automation_name: Optional[str] = None
+    status: str
+    log_output: Optional[str]
+    error_message: Optional[str]
+    steps_executed: int
+    total_steps: int
+    execution_time: Optional[float]
+    started_at: datetime
+    finished_at: Optional[datetime]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class LogListResponse(BaseModel):
+    logs: List[LogResponse]
+    total: int
+
+
+# ─── WhatsApp Schemas ─────────────────────────────────────────
+class WhatsAppStatusResponse(BaseModel):
+    status: str
+    phone: Optional[str]
+    connected_at: Optional[datetime]
+    disconnected_at: Optional[datetime]
+    error_message: Optional[str]
+    session_id: Optional[int]
+
+
+class WhatsAppConnectResponse(BaseModel):
+    status: str
+    message: str
+    qr: Optional[str] = None
+    session_id: Optional[int] = None
+
+
+class WhatsAppSendRequest(BaseModel):
+    phone: str
+    message: str
+
+    @field_validator('message')
+    @classmethod
+    def validate_message(cls, v):
+        if not v.strip():
+            raise ValueError('Message cannot be empty')
+        return v
+
+
+# ─── Dashboard Schemas ────────────────────────────────────────
+class DashboardSummary(BaseModel):
+    total_contacts: int
+    sent_messages: int
+    failed_messages: int
+    active_automations: int
+    recent_activity: Optional[List[Dict[str, Any]]] = []
+
+
+# ─── Common Response ──────────────────────────────────────────
+class SuccessResponse(BaseModel):
+    success: bool = True
+    message: str
+    data: Optional[Any] = None

@@ -1,0 +1,112 @@
+"""
+WhatsApp Automate — FastAPI Main Application Entry Point
+"""
+import logging
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
+
+from config.settings import settings
+from utils.helpers import setup_logging
+from database.connection import check_db_connection
+
+# ─── Setup Logging ────────────────────────────────────────────
+setup_logging()
+logger = logging.getLogger(__name__)
+
+
+# ─── Startup / Shutdown ───────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """App startup and shutdown events."""
+    logger.info(f"Starting {settings.APP_NAME} [{settings.APP_ENV}]")
+    
+    # Check database connectivity
+    db_ok = check_db_connection()
+    if db_ok:
+        logger.info("✅ Database connected")
+    else:
+        logger.warning("⚠️  Database connection failed — check .env DB_ settings")
+    
+    yield
+    
+    logger.info(f"Shutting down {settings.APP_NAME}")
+
+
+# ─── FastAPI App ──────────────────────────────────────────────
+app = FastAPI(
+    title=settings.APP_NAME,
+    description="WhatsApp Automation Platform API — n8n-style workflow automation for WhatsApp",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    lifespan=lifespan,
+)
+
+
+# ─── CORS ─────────────────────────────────────────────────────
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[settings.FRONTEND_URL, "http://localhost:5173", "http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ─── Health Check ─────────────────────────────────────────────
+@app.get("/health", tags=["System"])
+async def health_check():
+    """Health check endpoint — returns service status."""
+    db_ok = check_db_connection()
+    return {
+        "status": "healthy" if db_ok else "degraded",
+        "service": settings.APP_NAME,
+        "version": "1.0.0",
+        "environment": settings.APP_ENV,
+        "database": "connected" if db_ok else "disconnected",
+    }
+
+
+@app.get("/", tags=["System"])
+async def root():
+    """Root endpoint — API info."""
+    return {
+        "name": settings.APP_NAME,
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/health",
+    }
+
+
+# ─── Register Routes ──────────────────────────────────────────
+from routes.whatsapp import router as whatsapp_router
+from routes.contacts import router as contacts_router
+from routes.messages import router as messages_router
+from routes.automations import router as automations_router
+from routes.logs import router as logs_router
+from routes.dashboard import router as dashboard_router
+
+API_PREFIX = "/api/v1"
+
+app.include_router(whatsapp_router, prefix=API_PREFIX)
+app.include_router(contacts_router, prefix=API_PREFIX)
+app.include_router(messages_router, prefix=API_PREFIX)
+app.include_router(automations_router, prefix=API_PREFIX)
+app.include_router(logs_router, prefix=API_PREFIX)
+app.include_router(dashboard_router, prefix=API_PREFIX)
+
+logger.info("✅ All API routes registered")
+
+
+# ─── Run directly ─────────────────────────────────────────────
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=settings.APP_PORT,
+        reload=settings.APP_DEBUG,
+        log_level=settings.LOG_LEVEL.lower(),
+    )
