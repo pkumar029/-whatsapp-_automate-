@@ -200,6 +200,7 @@ class WhatsAppStatusResponse(BaseModel):
     session_id: Optional[int]
     connection_type: Optional[str] = None
     pairing_code: Optional[str] = None
+    qr: Optional[str] = None
 
 
 class WhatsAppConnectResponse(BaseModel):

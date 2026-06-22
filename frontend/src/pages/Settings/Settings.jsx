@@ -128,7 +128,7 @@ export default function Settings() {
 
     const config = {
       connection_type: connectionType,
-      phone: phone || undefined,
+      phone: (connectionType === 'bridge' && bridgeLinkMethod === 'qr') ? undefined : (phone || undefined),
       meta_token: connectionType === 'meta' ? metaToken : undefined,
       meta_phone_number_id: connectionType === 'meta' ? metaPhoneNumberId : undefined,
       meta_business_account_id: connectionType === 'meta' ? metaBusinessAccountId : undefined
@@ -297,18 +297,7 @@ export default function Settings() {
                     </label>
                   </div>
 
-                  {bridgeLinkMethod === 'qr' ? (
-                    <div style={{ marginBottom: 16 }}>
-                      <label style={{ display: 'block', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: 6 }}>Phone Label (Optional)</label>
-                      <input 
-                        type="text" 
-                        className="form-input" 
-                        placeholder="e.g. My Personal Number" 
-                        value={phone} 
-                        onChange={e => setPhone(e.target.value)} 
-                      />
-                    </div>
-                  ) : (
+                  {bridgeLinkMethod === 'qr' ? null : (
                     <div style={{ marginBottom: 16 }}>
                       <label style={{ display: 'block', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: 6 }}>Phone Number * (with Country Code, e.g. +91xxxxxx)</label>
                       <input 

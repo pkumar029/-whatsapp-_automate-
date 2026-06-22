@@ -99,6 +99,7 @@ def get_session_status(db: Session) -> dict:
         "session_id": session.id,
         "connection_type": connection_type,
         "pairing_code": pairing_code,
+        "qr": session.qr_code,
     }
 
 
