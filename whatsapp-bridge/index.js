@@ -2,6 +2,20 @@ const express = require('express');
 const cors = require('cors');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
+const fs = require('fs');
+const path = require('path');
+
+function removeSessionLockfile() {
+    const lockfilePath = path.join(__dirname, '.wwebjs_auth', 'session', 'lockfile');
+    try {
+        if (fs.existsSync(lockfilePath)) {
+            fs.unlinkSync(lockfilePath);
+            console.log('Deleted session lockfile successfully.');
+        }
+    } catch (err) {
+        console.warn('Failed to delete session lockfile:', err.message);
+    }
+}
 
 process.on('uncaughtException', (err) => {
     console.error('Uncaught Exception caught:', err.message);
@@ -30,14 +44,19 @@ let pairingCode = null;
 let lastError = null;
 
 // Initialize WhatsApp client
-function initClient(phoneForPairingCode = null) {
+async function initClient(phoneForPairingCode = null) {
     if (client) {
         try {
-            client.destroy();
+            console.log('Destroying existing client browser session...');
+            await client.destroy();
+            console.log('Existing client destroyed.');
         } catch (e) {
             console.error('Error destroying client:', e);
         }
     }
+
+    // Clean lock file before restarting to prevent EBUSY/locked session folder errors
+    removeSessionLockfile();
 
     clientStatus = 'connecting';
     qrCodeBase64 = null;
@@ -69,15 +88,19 @@ function initClient(phoneForPairingCode = null) {
             qrCodeBase64 = qrDataUrl.split(',')[1];
             clientStatus = 'connecting';
 
-            // Generate pairing code if phone number is specified
-            if (phoneForPairingCode && !pairingCode) {
+            // Generate pairing code if phone number is specified (regenerate on QR refreshes)
+            if (phoneForPairingCode) {
                 console.log(`Requesting pairing code for ${phoneForPairingCode}...`);
                 try {
-                    const cleanPhone = phoneForPairingCode.replace(/[+\s-()]/g, '');
+                    const cleanPhone = phoneForPairingCode.replace(/\D/g, '');
+                    if (cleanPhone.length < 8 || cleanPhone.length > 15) {
+                        throw new Error('Phone number must be between 8 and 15 digits (including country code)');
+                    }
                     const code = await client.requestPairingCode(cleanPhone);
                     // Format pairing code beautifully (e.g. ABCD-EFGH)
                     pairingCode = code ? (code.substring(0, 4) + '-' + code.substring(4)) : code;
                     console.log(`Pairing code received: ${pairingCode}`);
+                    lastError = null;
                 } catch (codeErr) {
                     console.error('Error generating pairing code:', codeErr);
                     lastError = `Failed to generate pairing code: ${codeErr.message}`;
@@ -93,7 +116,7 @@ function initClient(phoneForPairingCode = null) {
         clientStatus = 'connected';
         qrCodeBase64 = null;
         pairingCode = null;
-        connectedPhone = client.info.wid.user;
+        connectedPhone = (client.info && client.info.wid) ? client.info.wid.user : (client.info ? client.info.phone : phoneForPairingCode);
     });
 
     client.on('authenticated', () => {
@@ -153,12 +176,12 @@ app.get('/status', (req, res) => {
     });
 });
 
-app.post('/connect', (req, res) => {
+app.post('/connect', async (req, res) => {
     if (clientStatus === 'connected') {
         return res.json({ success: true, message: 'Already connected', phone: connectedPhone });
     }
     const { phone } = req.body;
-    initClient(phone);
+    await initClient(phone);
     res.json({ success: true, message: 'Initialization started' });
 });
 

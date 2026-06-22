@@ -49,8 +49,8 @@ def get_session_status(db: Session) -> dict:
     connection_type = session.session_data.get("connection_type") if session.session_data else None
     pairing_code = None
     
-    # If connection type is bridge and status is connecting, check bridge status
-    if connection_type == "bridge" and session.status == SessionStatus.connecting:
+    # If connection type is bridge and status is connecting or connected, check bridge status
+    if connection_type == "bridge" and session.status in (SessionStatus.connecting, SessionStatus.connected):
         try:
             import httpx
             r = httpx.get("http://localhost:3000/status", timeout=2.0)
@@ -58,6 +58,7 @@ def get_session_status(db: Session) -> dict:
                 bridge_data = r.json()
                 bridge_status = bridge_data.get("status")
                 pairing_code = bridge_data.get("pairing_code")
+                bridge_error = bridge_data.get("error")
                 
                 # Update DB state based on bridge state
                 if bridge_status == "connected":
@@ -66,6 +67,7 @@ def get_session_status(db: Session) -> dict:
                     session.phone = bridge_data.get("phone")
                     session.connected_at = datetime.utcnow()
                     session.qr_code = None
+                    session.error_message = None
                     db.commit()
                     
                     if was_connecting:
@@ -76,12 +78,14 @@ def get_session_status(db: Session) -> dict:
                         except Exception as sync_err:
                             logger.error(f"Failed to auto-sync contacts on connection: {sync_err}")
                 elif bridge_status == "connecting":
-
                     session.qr_code = bridge_data.get("qr")
+                    if bridge_error:
+                        session.error_message = bridge_error
                     db.commit()
-                elif bridge_status == "disconnected":
+                elif bridge_status == "disconnected" or bridge_status == "error":
                     session.status = SessionStatus.disconnected
                     session.qr_code = None
+                    session.error_message = bridge_error
                     db.commit()
         except Exception as e:
             logger.warning(f"Failed to check bridge status: {e}")
