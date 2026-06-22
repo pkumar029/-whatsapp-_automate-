@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Users, Plus, Search, Edit2, Trash2, Phone, X, Check, RefreshCw } from 'lucide-react'
 import { contactsApi } from '../../services/api'
 import { formatISTDate } from '../../utils/date'
+import { getErrorMessage } from '../../utils/error'
 
 
 // ─── Contact Form Modal ───────────────────────────────────────
@@ -31,7 +32,7 @@ function ContactModal({ contact, onClose, onSave }) {
       }
       onSave()
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to save contact.')
+      setError(getErrorMessage(err, 'Failed to save contact.'))
     } finally {
       setSaving(false)
     }
@@ -124,7 +125,7 @@ export default function Contacts() {
       setSyncMessage(res.data?.message || 'Contacts synced successfully!')
       fetchContacts()
     } catch (err) {
-      setSyncMessage(err.response?.data?.detail || err.message || 'Sync failed.')
+      setSyncMessage(getErrorMessage(err, 'Sync failed.'))
     } finally {
       setSyncing(false)
       setTimeout(() => setSyncMessage(''), 6000)

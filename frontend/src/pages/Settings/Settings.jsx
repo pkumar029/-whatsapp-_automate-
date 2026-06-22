@@ -3,6 +3,7 @@ import { Settings as SettingsIcon, Wifi, WifiOff, QrCode, LogOut, Save, RefreshC
 import { whatsappApi } from '../../services/api'
 import { useApp } from '../../context/AppContext'
 import { formatIST } from '../../utils/date'
+import { getErrorMessage } from '../../utils/error'
 
 
 export default function Settings() {
@@ -147,8 +148,7 @@ export default function Settings() {
         setStatus(prev => ({ ...prev, status: 'connecting', connection_type: connectionType }));
       }
     } catch (err) {
-      const detail = err.response?.data?.detail || err.message || 'Connection failed.';
-      setErrorMsg(detail);
+      setErrorMsg(getErrorMessage(err, 'Connection failed.'));
     } finally {
       setConnecting(false);
     }

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { messagesApi, contactsApi } from '../../services/api'
 import { formatISTTime } from '../../utils/date'
+import { getErrorMessage } from '../../utils/error'
 
 
 export default function Messages() {
@@ -99,7 +100,7 @@ export default function Messages() {
       setNewMessage('')
       fetchMessages()
     } catch (err) {
-      alert(err.response?.data?.detail || 'Failed to send message.')
+      alert(getErrorMessage(err, 'Failed to send message.'))
     }
   }
 
