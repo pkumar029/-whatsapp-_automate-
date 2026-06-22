@@ -1,8 +1,8 @@
-import { useLocation, Link } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { Bell, Search, RefreshCw, Sun, Moon } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
-import { whatsappApi } from '../../services/api'
 import { useState, useEffect } from 'react'
+import { whatsappApi } from '../../services/api'
 
 const pageMeta = {
   '/dashboard': { title: 'Dashboard', subtitle: 'Welcome back — here\'s your automation overview' },
@@ -17,19 +17,19 @@ export default function Header() {
   const { pathname } = useLocation()
   const meta = pageMeta[pathname] || { title: 'WhatsApp Automate', subtitle: '' }
   const { theme, toggleTheme, profile } = useApp()
-  const [sessionStatus, setSessionStatus] = useState({ status: 'disconnected', phone: null })
+  const [isConnected, setIsConnected] = useState(false)
 
   useEffect(() => {
-    const fetchStatus = async () => {
+    const checkStatus = async () => {
       try {
         const res = await whatsappApi.getStatus()
-        setSessionStatus(res.data)
+        setIsConnected(res.data.status === 'connected')
       } catch {
-        setSessionStatus({ status: 'disconnected', phone: null })
+        setIsConnected(false)
       }
     }
-    fetchStatus()
-    const interval = setInterval(fetchStatus, 5000)
+    checkStatus()
+    const interval = setInterval(checkStatus, 5000)
     return () => clearInterval(interval)
   }, [])
 
@@ -56,15 +56,10 @@ export default function Header() {
         <button className="header-btn" title="Notifications">
           <Bell size={16} />
         </button>
-        {sessionStatus.status === 'connected' && (
-          <Link 
-            to="/settings" 
-            className="avatar" 
-            title={`${profile.name} (${profile.email}) — Click to configure profile`}
-            style={{ display: 'flex', textDecoration: 'none', alignItems: 'center', justifyContent: 'center' }}
-          >
+        {isConnected && (
+          <div className="avatar" title={`${profile.name} (${profile.email})`}>
             {initial}
-          </Link>
+          </div>
         )}
       </div>
     </header>
