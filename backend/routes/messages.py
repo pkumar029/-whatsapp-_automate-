@@ -16,7 +16,7 @@ async def list_messages(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     search: Optional[str] = Query(None),
-    direction: Optional[str] = Query(None, regex="^(inbound|outbound)$"),
+    direction: Optional[str] = Query(None, pattern="^(inbound|outbound)$"),
     contact_id: Optional[int] = Query(None),
     db: Session = Depends(get_db)
 ):

@@ -1015,3 +1015,30 @@ tr:hover td {
     grid-template-columns: 1fr;
   }
 }
+
+/* ─── Light Mode Theme overrides ────────────────────────────── */
+[data-theme="light"] {
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f1f5f9;
+  --bg-card: #ffffff;
+  --bg-hover: #e2e8f0;
+  --bg-glass: rgba(255, 255, 255, 0.85);
+
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --text-inverse: #ffffff;
+
+  --border-primary: rgba(15, 23, 42, 0.08);
+  --border-active: rgba(37, 211, 102, 0.6);
+  --border-focus: rgba(37, 211, 102, 0.8);
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.12);
+  --shadow-glow-green: 0 0 20px rgba(37, 211, 102, 0.15);
+  --shadow-glow-purple: 0 0 20px rgba(139, 92, 246, 0.15);
+
+  --gradient-sidebar: linear-gradient(180deg, #f1f5f9 0%, #e2e8f0 100%);
+}

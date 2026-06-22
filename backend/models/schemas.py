@@ -183,6 +183,14 @@ class LogListResponse(BaseModel):
 
 
 # ─── WhatsApp Schemas ─────────────────────────────────────────
+class WhatsAppConnectRequest(BaseModel):
+    connection_type: str  # "dev", "meta", "bridge"
+    phone: Optional[str] = None
+    meta_token: Optional[str] = None
+    meta_phone_number_id: Optional[str] = None
+    meta_business_account_id: Optional[str] = None
+
+
 class WhatsAppStatusResponse(BaseModel):
     status: str
     phone: Optional[str]
@@ -190,6 +198,8 @@ class WhatsAppStatusResponse(BaseModel):
     disconnected_at: Optional[datetime]
     error_message: Optional[str]
     session_id: Optional[int]
+    connection_type: Optional[str] = None
+    pairing_code: Optional[str] = None
 
 
 class WhatsAppConnectResponse(BaseModel):
@@ -197,6 +207,7 @@ class WhatsAppConnectResponse(BaseModel):
     message: str
     qr: Optional[str] = None
     session_id: Optional[int] = None
+
 
 
 class WhatsAppSendRequest(BaseModel):

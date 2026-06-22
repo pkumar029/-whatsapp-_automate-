@@ -39,6 +39,17 @@ async def search_contacts(q: str = Query(..., min_length=1), db: Session = Depen
     return result["contacts"]
 
 
+@router.post("/sync")
+async def sync_contacts(db: Session = Depends(get_db)):
+    """Sync contacts from the connected WhatsApp session."""
+    try:
+        return contacts_service.sync_whatsapp_contacts(db)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/{contact_id}", response_model=ContactResponse)
 async def get_contact(contact_id: int, db: Session = Depends(get_db)):
     """Get a single contact by ID."""

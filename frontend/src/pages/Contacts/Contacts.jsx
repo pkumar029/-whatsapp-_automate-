@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Users, Plus, Search, Edit2, Trash2, Phone, X, Check } from 'lucide-react'
+import { Users, Plus, Search, Edit2, Trash2, Phone, X, Check, RefreshCw } from 'lucide-react'
 import { contactsApi } from '../../services/api'
 
 // ─── Contact Form Modal ───────────────────────────────────────
@@ -84,11 +84,15 @@ export default function Contacts() {
   const [showModal, setShowModal] = useState(false)
   const [editContact, setEditContact] = useState(null)
   const [deleteId, setDeleteId] = useState(null)
+  
+  // Sync states
+  const [syncing, setSyncing] = useState(false)
+  const [syncMessage, setSyncMessage] = useState('')
 
   const fetchContacts = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await contactsApi.getAll({ search, page: 1, limit: 50 })
+      const res = await contactsApi.getAll({ search, page: 1, limit: 100 })
       setContacts(res.data?.contacts || res.data || [])
     } catch {
       setContacts([])
@@ -110,6 +114,21 @@ export default function Contacts() {
     } catch { }
   }
 
+  const handleSync = async () => {
+    setSyncing(true)
+    setSyncMessage('')
+    try {
+      const res = await contactsApi.sync()
+      setSyncMessage(res.data?.message || 'Contacts synced successfully!')
+      fetchContacts()
+    } catch (err) {
+      setSyncMessage(err.response?.data?.detail || err.message || 'Sync failed.')
+    } finally {
+      setSyncing(false)
+      setTimeout(() => setSyncMessage(''), 6000)
+    }
+  }
+
   const openEdit = (contact) => { setEditContact(contact); setShowModal(true) }
   const openAdd = () => { setEditContact(null); setShowModal(true) }
 
@@ -120,10 +139,22 @@ export default function Contacts() {
           <h2 className="page-title">Contacts</h2>
           <p className="page-subtitle">{contacts.length} contacts total</p>
         </div>
-        <button className="btn btn-primary" onClick={openAdd}>
-          <Plus size={16} /> Add Contact
-        </button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn btn-secondary" onClick={handleSync} disabled={syncing}>
+            <RefreshCw size={16} style={{ animation: syncing ? 'spin 1s linear infinite' : 'none', marginRight: 6 }} />
+            {syncing ? 'Syncing...' : 'Sync WhatsApp Contacts'}
+          </button>
+          <button className="btn btn-primary" onClick={openAdd}>
+            <Plus size={16} /> Add Contact
+          </button>
+        </div>
       </div>
+
+      {syncMessage && (
+        <div style={{ background: 'var(--accent-primary-muted)', border: '1px solid rgba(37,211,102,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 14px', marginBottom: 16, fontSize: 'var(--font-size-sm)', color: 'var(--accent-primary)' }}>
+          {syncMessage}
+        </div>
+      )}
 
       <div className="table-container">
         <div className="table-toolbar">
@@ -148,8 +179,13 @@ export default function Contacts() {
           <div className="empty-state">
             <div className="empty-state-icon"><Users size={28} /></div>
             <div className="empty-state-title">No contacts found</div>
-            <div className="empty-state-desc">Add your first WhatsApp contact to get started</div>
-            <button className="btn btn-primary" onClick={openAdd}><Plus size={16} /> Add Contact</button>
+            <div className="empty-state-desc">Add or Sync your WhatsApp contacts to get started</div>
+            <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
+              <button className="btn btn-secondary" onClick={handleSync} disabled={syncing}>
+                <RefreshCw size={14} style={{ animation: syncing ? 'spin 1s linear infinite' : 'none', marginRight: 6 }} /> Sync WhatsApp
+              </button>
+              <button className="btn btn-primary" onClick={openAdd}><Plus size={16} /> Add Contact</button>
+            </div>
           </div>
         ) : (
           <table>
@@ -225,6 +261,7 @@ export default function Contacts() {
           </div>
         </div>
       )}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }

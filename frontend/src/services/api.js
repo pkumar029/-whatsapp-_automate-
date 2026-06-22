@@ -38,7 +38,7 @@ api.interceptors.response.use(
 // ─── WhatsApp API ─────────────────────────────────────────────
 export const whatsappApi = {
   getStatus: () => api.get('/whatsapp/status'),
-  connect: () => api.post('/whatsapp/connect'),
+  connect: (data) => api.post('/whatsapp/connect', data),
   disconnect: () => api.post('/whatsapp/disconnect'),
   sendMessage: (data) => api.post('/whatsapp/send', data),
   getQR: () => api.get('/whatsapp/qr'),
@@ -52,6 +52,7 @@ export const contactsApi = {
   update: (id, data) => api.put(`/contacts/${id}`, data),
   delete: (id) => api.delete(`/contacts/${id}`),
   search: (query) => api.get('/contacts/search', { params: { q: query } }),
+  sync: () => api.post('/contacts/sync'),
 }
 
 // ─── Messages API ─────────────────────────────────────────────

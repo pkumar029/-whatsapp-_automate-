@@ -99,3 +99,73 @@ def delete_contact(db: Session, contact_id: int) -> bool:
 
 def get_total_contacts(db: Session) -> int:
     return db.query(func.count(Contact.id)).scalar() or 0
+
+
+def sync_whatsapp_contacts(db: Session) -> dict:
+    """Fetch contacts from the active WhatsApp session and save/update in the database."""
+    from services import whatsapp_service
+    from models.models import Contact, WhatsappSession, SessionStatus
+    
+    session = whatsapp_service.get_or_create_session(db)
+    if session.status != SessionStatus.connected:
+        raise ValueError("WhatsApp session is not connected. Connect first.")
+        
+    connection_type = session.session_data.get("connection_type") if session.session_data else "dev"
+    
+    if connection_type == "dev":
+        # Simulate syncing contacts in Dev mode by creating a few dummy contacts if empty
+        dummy_contacts = [
+            {"name": "Alice Smith", "phone": "+919876543210"},
+            {"name": "Bob Johnson", "phone": "+919876543211"},
+            {"name": "Charlie Brown", "phone": "+919876543212"},
+        ]
+        count = 0
+        for dc in dummy_contacts:
+            existing = db.query(Contact).filter(Contact.phone == dc["phone"]).first()
+            if not existing:
+                contact = Contact(name=dc["name"], phone=dc["phone"], is_active=True)
+                db.add(contact)
+                count += 1
+        db.commit()
+        return {"success": True, "message": f"Dev contacts simulated successfully. Synced {count} contacts."}
+        
+    elif connection_type == "meta":
+        return {"success": True, "message": "Meta Cloud API does not support phone contact list sync. Please import contacts manually."}
+        
+    elif connection_type == "bridge":
+        import httpx
+        try:
+            r = httpx.get("http://localhost:3000/contacts", timeout=20.0)
+            if r.status_code != 200:
+                raise Exception(f"Bridge returned status code {r.status_code}")
+                
+            res_data = r.json()
+            wa_contacts = res_data.get("contacts", [])
+            
+            synced_count = 0
+            for wc in wa_contacts:
+                phone = wc["phone"]
+                name = wc["name"]
+                
+                # Check if contact already exists
+                existing = db.query(Contact).filter(Contact.phone == phone).first()
+                if existing:
+                    # Update name if it changed
+                    if existing.name != name:
+                        existing.name = name
+                        db.add(existing)
+                        synced_count += 1
+                else:
+                    # Insert new contact
+                    contact = Contact(name=name, phone=phone, is_active=True)
+                    db.add(contact)
+                    synced_count += 1
+                    
+            db.commit()
+            return {"success": True, "message": f"Successfully synced {synced_count} contacts from your phone."}
+        except Exception as e:
+            logger.error(f"Failed to sync contacts from bridge: {e}")
+            raise Exception(f"Failed to sync contacts: {str(e)}")
+            
+    else:
+        raise ValueError(f"Unknown connection type: {connection_type}")
