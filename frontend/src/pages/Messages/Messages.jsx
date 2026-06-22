@@ -28,6 +28,23 @@ export default function Messages() {
   const [attachUrl, setAttachUrl] = useState('')
 
   const chatEndRef = useRef(null)
+  const fileInputRef = useRef(null)
+  const imageInputRef = useRef(null)
+
+  const handleFileChange = (e, type) => {
+    const file = e.target.files[0]
+    if (!file) return
+    
+    const typeLabel = type === 'file' ? '📄 Document' : '🖼️ Image'
+    const simulatedMsg = `${typeLabel}: ${file.name}`
+    
+    handleSend(simulatedMsg, {
+      url: `file://${file.name}`,
+      type: type
+    })
+    
+    e.target.value = null
+  }
 
   // Fetch contacts list
   const fetchContacts = useCallback(async () => {
@@ -314,8 +331,14 @@ export default function Messages() {
                       <button
                         key={item.id}
                         onClick={() => {
-                          setAttachModal(item.id)
                           setShowAttachMenu(false)
+                          if (item.id === 'file') {
+                            fileInputRef.current?.click()
+                          } else if (item.id === 'image') {
+                            imageInputRef.current?.click()
+                          } else {
+                            setAttachModal(item.id)
+                          }
                         }}
                         style={{
                           display: 'flex',
@@ -453,6 +476,19 @@ export default function Messages() {
         </div>
       )}
 
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        style={{ display: 'none' }} 
+        onChange={(e) => handleFileChange(e, 'file')} 
+      />
+      <input 
+        type="file" 
+        ref={imageInputRef} 
+        style={{ display: 'none' }} 
+        onChange={(e) => handleFileChange(e, 'image')} 
+        accept="image/*"
+      />
     </div>
   )
 }

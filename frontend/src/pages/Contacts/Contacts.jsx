@@ -53,15 +53,15 @@ function ContactModal({ contact, onClose, onSave }) {
           )}
           <div className="form-group">
             <label className="form-label">Full Name *</label>
-            <input className="form-input" placeholder="John Doe" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+            <input className="form-input" placeholder="Enter a name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
           </div>
           <div className="form-group">
             <label className="form-label">Phone Number *</label>
-            <input className="form-input" placeholder="+91 9876543210" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
+            <input className="form-input" placeholder="+91xxxxxx" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
           </div>
           <div className="form-group">
             <label className="form-label">Email</label>
-            <input className="form-input" type="email" placeholder="john@example.com" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
+            <input className="form-input" type="email" placeholder="example@gmail.com" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
           </div>
           <div className="form-group">
             <label className="form-label">Notes</label>

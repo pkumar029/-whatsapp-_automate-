@@ -153,7 +153,7 @@ function StepRow({ step, index, onUpdate, onDelete }) {
                   style={{ padding: '6px 10px', fontSize: 13 }}
                   value={config.name || ''} 
                   onChange={e => updateConfigField('name', e.target.value)}
-                  placeholder="e.g. New Name"
+                  placeholder="Enter a name"
                 />
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
@@ -164,7 +164,7 @@ function StepRow({ step, index, onUpdate, onDelete }) {
                   style={{ padding: '6px 10px', fontSize: 13 }}
                   value={config.email || ''} 
                   onChange={e => updateConfigField('email', e.target.value)}
-                  placeholder="e.g. new@example.com"
+                  placeholder="example@gmail.com"
                 />
               </div>
             </div>
@@ -320,7 +320,7 @@ function AutomationModal({ automation, onClose, onSave }) {
           <div className="grid-2">
             <div className="form-group">
               <label className="form-label">Name *</label>
-              <input className="form-input" placeholder="My Automation" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+              <input className="form-input" placeholder="Enter a name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
             </div>
             <div className="form-group">
               <label className="form-label">Trigger Type</label>

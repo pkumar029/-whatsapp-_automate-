@@ -310,11 +310,11 @@ export default function Settings() {
                     </div>
                   ) : (
                     <div style={{ marginBottom: 16 }}>
-                      <label style={{ display: 'block', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: 6 }}>Phone Number * (with Country Code, e.g. +919876543210)</label>
+                      <label style={{ display: 'block', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: 6 }}>Phone Number * (with Country Code, e.g. +91xxxxxx)</label>
                       <input 
                         type="text" 
                         className="form-input" 
-                        placeholder="e.g. +919876543210" 
+                        placeholder="+91xxxxxx" 
                         value={phone} 
                         onChange={e => setPhone(e.target.value)} 
                         required
@@ -390,7 +390,7 @@ export default function Settings() {
               <input 
                 type="text" 
                 className="form-input" 
-                placeholder="Jane Doe"
+                placeholder="Enter a name"
                 value={profileName} 
                 onChange={e => setProfileName(e.target.value)} 
                 required
@@ -402,7 +402,7 @@ export default function Settings() {
               <input 
                 type="email" 
                 className="form-input" 
-                placeholder="jane@example.com"
+                placeholder="example@gmail.com"
                 value={profileEmail} 
                 onChange={e => setProfileEmail(e.target.value)} 
                 required
