@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Users, Plus, Search, Edit2, Trash2, Phone, X, Check, RefreshCw } from 'lucide-react'
 import { contactsApi } from '../../services/api'
+import { formatISTDate } from '../../utils/date'
+
 
 // ─── Contact Form Modal ───────────────────────────────────────
 function ContactModal({ contact, onClose, onSave }) {
@@ -219,7 +221,7 @@ export default function Contacts() {
                       {c.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </td>
-                  <td>{c.created_at ? new Date(c.created_at).toLocaleDateString() : '—'}</td>
+                  <td>{c.created_at ? formatISTDate(c.created_at) : '—'}</td>
                   <td>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(c)} title="Edit"><Edit2 size={14} /></button>

@@ -5,6 +5,8 @@ import {
   Check, CheckCheck, Clock, AlertCircle, User 
 } from 'lucide-react'
 import { messagesApi, contactsApi } from '../../services/api'
+import { formatISTTime } from '../../utils/date'
+
 
 export default function Messages() {
   const [contacts, setContacts] = useState([])
@@ -276,7 +278,7 @@ export default function Messages() {
                         
                         {/* Time & Delivery Status */}
                         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginTop: 4, fontSize: '10px', color: 'var(--text-muted)' }}>
-                          {m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                          {m.created_at ? formatISTTime(m.created_at) : ''}
                           {isOutbound && statusIcon(m.status)}
                         </div>
                       </div>

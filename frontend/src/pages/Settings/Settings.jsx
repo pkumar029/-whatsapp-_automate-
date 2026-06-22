@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { Settings as SettingsIcon, Wifi, WifiOff, QrCode, LogOut, Save, RefreshCw, Shield, Bell, HelpCircle, User, Lock } from 'lucide-react'
 import { whatsappApi } from '../../services/api'
 import { useApp } from '../../context/AppContext'
+import { formatIST } from '../../utils/date'
+
 
 export default function Settings() {
   const { theme, setTheme, profile, updateProfile, changePassword } = useApp()
@@ -13,7 +15,8 @@ export default function Settings() {
   const [errorMsg, setErrorMsg] = useState('')
 
   // Connection options state
-  const [connectionType, setConnectionType] = useState('dev') // dev, meta, bridge
+  const [connectionType, setConnectionType] = useState('bridge') // dev, meta, bridge
+
   const [phone, setPhone] = useState('')
   const [bridgeLinkMethod, setBridgeLinkMethod] = useState('qr') // qr or otp
   
@@ -219,7 +222,7 @@ export default function Settings() {
                 </div>
                 <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>Active Phone Number / ID</div>
                 <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>{status.phone || 'Unknown'}</div>
-                {status.connected_at && <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginTop: 4 }}>Since {new Date(status.connected_at).toLocaleString()}</div>}
+                {status.connected_at && <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginTop: 4 }}>Since {formatIST(status.connected_at)}</div>}
               </div>
               <button className="btn btn-danger" onClick={handleDisconnect}>
                 <LogOut size={16} /> Disconnect Session
@@ -266,184 +269,70 @@ export default function Settings() {
             </div>
           ) : (
             <div>
-              {/* Option Selector Cards */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
-                {[
-                  {
-                    id: 'dev',
-                    title: 'Option 1: Dev Bypass',
-                    icon: '🔧',
-                    desc: 'Simulate connection instantly. Perfect for testing UI, messages logs, and automation step runs without real WhatsApp.'
-                  },
-                  {
-                    id: 'meta',
-                    title: 'Option 2: Meta API',
-                    icon: '🏢',
-                    desc: 'Official WhatsApp Cloud API. Best for official business use. Requires access token and Phone Number ID from Meta.'
-                  },
-                  {
-                    id: 'bridge',
-                    title: 'Option 3: Web Bridge',
-                    icon: '📱',
-                    desc: 'Uses whatsapp-web.js bridge. Connect your personal WhatsApp number by scanning a QR code or entering a phone pairing code.'
-                  }
-                ].map(opt => (
-                  <div 
-                    key={opt.id} 
-                    onClick={() => setConnectionType(opt.id)}
-                    style={{ 
-                      padding: 16, 
-                      borderRadius: 'var(--radius-md)', 
-                      border: connectionType === opt.id ? '2px solid var(--accent-primary)' : '1px solid var(--border-primary)', 
-                      background: connectionType === opt.id ? 'rgba(37,211,102,0.05)' : 'var(--bg-tertiary)', 
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease',
-                      boxShadow: connectionType === opt.id ? '0 0 10px rgba(37,211,102,0.1)' : 'none'
-                    }}
-                  >
-                    <div style={{ fontSize: '24px', marginBottom: 8 }}>{opt.icon}</div>
-                    <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 'var(--font-size-sm)', marginBottom: 6 }}>{opt.title}</div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)', lineHeight: 1.4 }}>{opt.desc}</div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Form Input fields dynamically changing */}
+              {/* Form Input fields for whatsapp-web.js Web Bridge only */}
               <form onSubmit={handleConnect} style={{ background: 'var(--bg-tertiary)', padding: 16, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-primary)' }}>
                 <h4 style={{ margin: '0 0 14px 0', fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
-                  {connectionType === 'dev' && 'Configure Dev Bypass Connection'}
-                  {connectionType === 'meta' && 'Configure Meta Official API'}
-                  {connectionType === 'bridge' && 'Configure whatsapp-web.js Bridge'}
+                  Configure whatsapp-web.js Web Bridge
                 </h4>
 
-                {connectionType === 'dev' && (
-                  <div style={{ marginBottom: 16 }}>
-                    <label style={{ display: 'block', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: 6 }}>Mock Phone Number</label>
-                    <input 
-                      type="text" 
-                      className="input" 
-                      placeholder="+91 98765 43210" 
-                      value={phone} 
-                      onChange={e => setPhone(e.target.value)} 
-                    />
-                    <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginTop: 6 }}>
-                      Connecting this option bypasses QR scanning and simulates a linked session immediately.
-                    </div>
-                  </div>
-                )}
-
-                {connectionType === 'meta' && (
-                  <div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: 6 }}>Phone Number ID *</label>
-                        <input 
-                          type="text" 
-                          className="input" 
-                          placeholder="e.g. 10984729384729" 
-                          value={metaPhoneNumberId} 
-                          onChange={e => setMetaPhoneNumberId(e.target.value)} 
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: 6 }}>Business Account ID *</label>
-                        <input 
-                          type="text" 
-                          className="input" 
-                          placeholder="e.g. 29384758291039" 
-                          value={metaBusinessAccountId} 
-                          onChange={e => setMetaBusinessAccountId(e.target.value)} 
-                          required
-                        />
-                      </div>
-                    </div>
-                    <div style={{ marginBottom: 12 }}>
-                      <label style={{ display: 'block', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: 6 }}>Temporary or Permanent Access Token *</label>
+                <div>
+                  <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--font-size-sm)', cursor: 'pointer', color: 'var(--text-primary)' }}>
                       <input 
-                        type="password" 
-                        className="input" 
-                        placeholder="EAAGz..." 
-                        value={metaToken} 
-                        onChange={e => setMetaToken(e.target.value)} 
-                        required
+                        type="radio" 
+                        name="bridge_method" 
+                        checked={bridgeLinkMethod === 'qr'} 
+                        onChange={() => setBridgeLinkMethod('qr')} 
                       />
-                    </div>
+                      Scan QR Code
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--font-size-sm)', cursor: 'pointer', color: 'var(--text-primary)' }}>
+                      <input 
+                        type="radio" 
+                        name="bridge_method" 
+                        checked={bridgeLinkMethod === 'otp'} 
+                        onChange={() => setBridgeLinkMethod('otp')} 
+                      />
+                      Use Pairing Code (OTP)
+                    </label>
+                  </div>
+
+                  {bridgeLinkMethod === 'qr' ? (
                     <div style={{ marginBottom: 16 }}>
-                      <label style={{ display: 'block', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: 6 }}>Associated Phone Number</label>
+                      <label style={{ display: 'block', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: 6 }}>Phone Label (Optional)</label>
                       <input 
                         type="text" 
-                        className="input" 
-                        placeholder="+1 555 123 4567" 
+                        className="form-input" 
+                        placeholder="e.g. My Personal Number" 
                         value={phone} 
                         onChange={e => setPhone(e.target.value)} 
                       />
                     </div>
-                  </div>
-                )}
-
-                {connectionType === 'bridge' && (
-                  <div>
-                    <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--font-size-sm)', cursor: 'pointer', color: 'var(--text-primary)' }}>
-                        <input 
-                          type="radio" 
-                          name="bridge_method" 
-                          checked={bridgeLinkMethod === 'qr'} 
-                          onChange={() => setBridgeLinkMethod('qr')} 
-                        />
-                        Scan QR Code
-                      </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--font-size-sm)', cursor: 'pointer', color: 'var(--text-primary)' }}>
-                        <input 
-                          type="radio" 
-                          name="bridge_method" 
-                          checked={bridgeLinkMethod === 'otp'} 
-                          onChange={() => setBridgeLinkMethod('otp')} 
-                        />
-                        Use Pairing Code (OTP)
-                      </label>
+                  ) : (
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={{ display: 'block', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: 6 }}>Phone Number * (with Country Code, e.g. +919876543210)</label>
+                      <input 
+                        type="text" 
+                        className="form-input" 
+                        placeholder="e.g. +919876543210" 
+                        value={phone} 
+                        onChange={e => setPhone(e.target.value)} 
+                        required
+                      />
                     </div>
-
-                    {bridgeLinkMethod === 'qr' ? (
-                      <div style={{ marginBottom: 16 }}>
-                        <label style={{ display: 'block', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: 6 }}>Phone Label (Optional)</label>
-                        <input 
-                          type="text" 
-                          className="input" 
-                          placeholder="e.g. My Personal Number" 
-                          value={phone} 
-                          onChange={e => setPhone(e.target.value)} 
-                        />
-                      </div>
-                    ) : (
-                      <div style={{ marginBottom: 16 }}>
-                        <label style={{ display: 'block', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: 6 }}>Phone Number * (with Country Code, e.g. +919876543210)</label>
-                        <input 
-                          type="text" 
-                          className="input" 
-                          placeholder="e.g. +919876543210" 
-                          value={phone} 
-                          onChange={e => setPhone(e.target.value)} 
-                          required
-                        />
-                      </div>
-                    )}
-                    <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <HelpCircle size={12} />
-                      Requires the bridge Node process running on port 3000.
-                    </div>
+                  )}
+                  <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <HelpCircle size={12} />
+                    Requires the bridge Node process running on port 3000.
                   </div>
-                )}
+                </div>
 
-                <button type="submit" className="btn btn-primary btn-lg" disabled={connecting} style={{ marginTop: 8 }}>
+                <button type="submit" className="btn btn-primary btn-lg" disabled={connecting} style={{ marginTop: 12 }}>
                   {connecting ? (
                     <><RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> Initializing...</>
                   ) : (
                     <><QrCode size={16} /> 
-                      {connectionType === 'dev' && 'Connect Instantly'}
-                      {connectionType === 'meta' && 'Save & Connect Meta API'}
-                      {connectionType === 'bridge' && (bridgeLinkMethod === 'qr' ? 'Generate QR Code' : 'Generate Pairing Code')}
+                      {bridgeLinkMethod === 'qr' ? 'Generate QR Code' : 'Generate Pairing Code'}
                     </>
                   )}
                 </button>
@@ -451,6 +340,7 @@ export default function Settings() {
             </div>
           )}
         </div>
+
 
         {/* Profile Settings */}
         <div className="card">

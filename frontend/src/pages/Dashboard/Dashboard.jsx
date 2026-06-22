@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { Users, MessageSquare, Zap, Wifi, WifiOff, TrendingUp, CheckCircle, XCircle, Clock, ArrowRight } from 'lucide-react'
 import { dashboardApi, whatsappApi } from '../../services/api'
 import { Link } from 'react-router-dom'
+import { formatIST } from '../../utils/date'
+
 
 // ─── Stat Card Component ──────────────────────────────────────
 function StatCard({ title, value, icon: Icon, color, badge, badgeType }) {
@@ -57,7 +59,7 @@ function SessionCard({ status }) {
       {status?.connected_at && (
         <div style={{ marginTop: 12, fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
           <Clock size={12} />
-          Connected since {new Date(status.connected_at).toLocaleString()}
+          Connected since {formatIST(status.connected_at)}
         </div>
       )}
     </div>
@@ -158,7 +160,7 @@ export default function Dashboard() {
         <div>
           <h2 className="page-title">Overview</h2>
           <p className="page-subtitle">
-            {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+            {new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
           </p>
         </div>
         <Link to="/automations" className="btn btn-primary">
