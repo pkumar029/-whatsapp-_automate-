@@ -1,7 +1,7 @@
 """
 WhatsApp Routes — Connect, disconnect, status, send message
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from database.connection import get_db
 from services import whatsapp_service
@@ -72,7 +72,7 @@ class WebhookPayload(BaseModel):
     content: str
 
 @router.post("/webhook")
-async def whatsapp_webhook(payload: WebhookPayload, db: Session = Depends(get_db)):
+async def whatsapp_webhook(payload: WebhookPayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Receive inbound messages from WhatsApp bridge."""
     try:
         phone = payload.phone
@@ -102,6 +102,46 @@ async def whatsapp_webhook(payload: WebhookPayload, db: Session = Depends(get_db
         db.refresh(msg)
         
         logger.info(f"Webhook received and saved message from {phone}")
+
+        # 3. Trigger matching active automations in background
+        from models.models import Automation, TriggerType
+        from services.automation_runner import run_automation
+        from database.connection import SessionLocal
+
+        active_automations = db.query(Automation).filter(Automation.is_active == True).all()
+        for automation in active_automations:
+            should_trigger = False
+            trigger_reason = ""
+
+            if automation.trigger_type == TriggerType.message_received:
+                should_trigger = True
+                trigger_reason = "message_received"
+            elif automation.trigger_type == TriggerType.keyword:
+                keyword = automation.trigger_config.get("keyword") if automation.trigger_config else None
+                if keyword and content.strip().lower() == keyword.strip().lower():
+                    should_trigger = True
+                    trigger_reason = f"keyword: {keyword}"
+
+            if should_trigger:
+                logger.info(f"Triggering automation '{automation.name}' (ID: {automation.id}) via {trigger_reason}")
+
+                # Background runner wrapper to use fresh DB session (avoids request lifecycle closing issues)
+                def bg_run(auto_id, trig_data):
+                    bg_db = SessionLocal()
+                    try:
+                        run_automation(bg_db, auto_id, trig_data)
+                    except Exception as bg_err:
+                        logger.error(f"Background automation run failed: {bg_err}")
+                    finally:
+                        bg_db.close()
+
+                trigger_data = {
+                    "phone": phone,
+                    "content": content,
+                    "contact_id": contact.id
+                }
+                background_tasks.add_task(bg_run, automation.id, trigger_data)
+
         return {"success": True, "message_id": msg.id}
     except Exception as e:
         logger.error(f"Webhook error: {e}")

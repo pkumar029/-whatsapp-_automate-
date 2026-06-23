@@ -34,8 +34,13 @@ def execute_step(db: Session, step: AutomationStep, context: Dict[str, Any]) -> 
         message_template = config.get("message", "Hello!")
 
         # Simple template variable substitution
-        if context.get("contact"):
-            contact = context["contact"]
+        contact = context.get("contact")
+        if not contact and context.get("contact_id"):
+            contact = db.query(Contact).filter(Contact.id == context.get("contact_id")).first()
+            if contact:
+                context["contact"] = contact
+
+        if contact:
             message_template = message_template.replace("{{name}}", contact.name or "")
             message_template = message_template.replace("{{phone}}", contact.phone or "")
 
@@ -51,8 +56,22 @@ def execute_step(db: Session, step: AutomationStep, context: Dict[str, Any]) -> 
             )
             db.add(msg)
             db.flush()
+            
+            try:
+                from services import whatsapp_service
+                whatsapp_service.send_whatsapp_message(db, phone, message_template)
+                msg.status = MessageStatus.sent
+                msg.sent_at = datetime.utcnow()
+                db.flush()
+                logger.info(f"Message successfully sent to {phone} via automation")
+            except Exception as send_err:
+                msg.status = MessageStatus.failed
+                msg.error_message = str(send_err)
+                db.flush()
+                logger.error(f"Failed to send automation message: {send_err}")
+                raise StepExecutionError(f"Failed to send WhatsApp message: {send_err}")
+                
             context["last_message_id"] = msg.id
-            logger.info(f"Message queued to {phone}: {message_template[:50]}")
         return context
 
     elif step.step_type == StepType.delay:
