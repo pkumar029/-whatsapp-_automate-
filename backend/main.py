@@ -29,8 +29,20 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("⚠️  Database connection failed — check .env DB_ settings")
     
+    # Start the queue worker background loop
+    import asyncio
+    from services.queue_service import run_queue_worker_loop
+    worker_task = asyncio.create_task(run_queue_worker_loop())
+    
     yield
     
+    # Cancel the queue worker background loop
+    worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        logger.info("Queue worker background loop cancelled successfully")
+        
     logger.info(f"Shutting down {settings.APP_NAME}")
 
 
@@ -87,6 +99,7 @@ from routes.messages import router as messages_router
 from routes.automations import router as automations_router
 from routes.logs import router as logs_router
 from routes.dashboard import router as dashboard_router
+from routes.campaigns import router as campaigns_router
 
 API_PREFIX = "/api/v1"
 
@@ -96,6 +109,7 @@ app.include_router(messages_router, prefix=API_PREFIX)
 app.include_router(automations_router, prefix=API_PREFIX)
 app.include_router(logs_router, prefix=API_PREFIX)
 app.include_router(dashboard_router, prefix=API_PREFIX)
+app.include_router(campaigns_router, prefix=API_PREFIX)
 
 logger.info("✅ All API routes registered")
 

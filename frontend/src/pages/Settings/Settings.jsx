@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Settings as SettingsIcon, Wifi, WifiOff, QrCode, LogOut, Save, RefreshCw, Shield, Bell, HelpCircle, User, Lock } from 'lucide-react'
 import { whatsappApi } from '../../services/api'
 import { useApp } from '../../context/AppContext'
@@ -7,7 +8,9 @@ import { getErrorMessage } from '../../utils/error'
 
 
 export default function Settings() {
-  const { theme, setTheme, profile, updateProfile, changePassword } = useApp()
+  const { theme, setTheme, profile, updateProfile, changePassword, refreshSessionStatus } = useApp()
+  const location = useLocation()
+  const navigate = useNavigate()
 
   const [status, setStatus] = useState({ status: 'disconnected' })
   const [connecting, setConnecting] = useState(false)
@@ -49,6 +52,7 @@ export default function Settings() {
     setProfileMessage('')
     setProfileError('')
     try {
+      const isFirstTime = !profile.isProfileConfigured
       await new Promise(r => setTimeout(r, 600))
       updateProfile({
         name: profileName,
@@ -56,7 +60,14 @@ export default function Settings() {
         company: profileCompany,
         role: profileRole
       })
-      setProfileMessage('Profile settings saved successfully!')
+      if (isFirstTime) {
+        setProfileMessage('Profile settings saved! Redirecting you to the dashboard...')
+        setTimeout(() => {
+          navigate('/dashboard')
+        }, 1500)
+      } else {
+        setProfileMessage('Profile settings saved successfully!')
+      }
     } catch (err) {
       setProfileError('Failed to save profile settings.')
     } finally {
@@ -128,7 +139,8 @@ export default function Settings() {
 
     const config = {
       connection_type: connectionType,
-      phone: (connectionType === 'bridge' && bridgeLinkMethod === 'qr') ? undefined : (phone || undefined),
+      phone: phone || undefined,
+      link_method: connectionType === 'bridge' ? bridgeLinkMethod : undefined,
       meta_token: connectionType === 'meta' ? metaToken : undefined,
       meta_phone_number_id: connectionType === 'meta' ? metaPhoneNumberId : undefined,
       meta_business_account_id: connectionType === 'meta' ? metaBusinessAccountId : undefined
@@ -143,9 +155,11 @@ export default function Settings() {
       if (res.data?.status === 'connected') {
         setMessage(res.data.message || 'Connected successfully!');
         setStatus(prev => ({ ...prev, status: 'connected', phone: phone || res.data.phone || 'Dev Session', connection_type: connectionType }));
+        await refreshSessionStatus();
       } else {
         setMessage(res.data.message || 'Connecting... Please wait.');
         setStatus(prev => ({ ...prev, status: 'connecting', connection_type: connectionType }));
+        await refreshSessionStatus();
       }
     } catch (err) {
       setErrorMsg(getErrorMessage(err, 'Connection failed.'));
@@ -157,6 +171,7 @@ export default function Settings() {
   const handleDisconnect = async () => {
     try {
       await whatsappApi.disconnect()
+      await refreshSessionStatus()
       setStatus({ status: 'disconnected' });
       setQrCode(null);
       setMessage('WhatsApp session disconnected.');
@@ -297,19 +312,21 @@ export default function Settings() {
                     </label>
                   </div>
 
-                  {bridgeLinkMethod === 'qr' ? null : (
-                    <div style={{ marginBottom: 16 }}>
-                      <label style={{ display: 'block', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: 6 }}>Phone Number * (with Country Code, e.g. +91xxxxxx)</label>
-                      <input 
-                        type="text" 
-                        className="form-input" 
-                        placeholder="+91xxxxxx" 
-                        value={phone} 
-                        onChange={e => setPhone(e.target.value)} 
-                        required
-                      />
-                    </div>
-                  )}
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ display: 'block', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: 6 }}>
+                      {bridgeLinkMethod === 'qr' 
+                        ? 'Verification Phone Number * (Scanned account must match this number for high security, with Country Code: +91xxxxxx)' 
+                        : 'Phone Number * (Required to generate pairing code, with Country Code: +91xxxxxx)'}
+                    </label>
+                    <input 
+                      type="text" 
+                      className="form-input" 
+                      placeholder="+91xxxxxx" 
+                      value={phone} 
+                      onChange={e => setPhone(e.target.value)} 
+                      required
+                    />
+                  </div>
                   <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
                     <HelpCircle size={12} />
                     Requires the bridge Node process running on port 3000.
@@ -338,6 +355,25 @@ export default function Settings() {
               <User size={16} /> Profile Details
             </span>
           </div>
+
+          {!profile.isProfileConfigured && (
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.12) 0%, rgba(37, 211, 102, 0.06) 100%)',
+              border: '1px solid rgba(139, 92, 246, 0.25)',
+              borderRadius: 'var(--radius-md)',
+              padding: '14px 16px',
+              marginBottom: 16,
+              backdropFilter: 'blur(10px)',
+              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)'
+            }}>
+              <h4 style={{ margin: '0 0 6px 0', color: '#fff', fontSize: 'var(--font-size-sm)', display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700 }}>
+                🚀 Complete Your Profile
+              </h4>
+              <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)', lineHeight: '1.5' }}>
+                Your WhatsApp account is linked! To finalize your workspace onboarding and unlock the dashboard, please enter your name and email.
+              </p>
+            </div>
+          )}
 
           {profileMessage && (
             <div style={{ background: 'var(--accent-primary-muted)', border: '1px solid rgba(37,211,102,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 14px', marginBottom: 16, fontSize: 'var(--font-size-sm)', color: 'var(--accent-primary)' }}>

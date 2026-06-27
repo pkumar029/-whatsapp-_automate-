@@ -146,18 +146,47 @@ def sync_whatsapp_contacts(db: Session) -> dict:
             for wc in wa_contacts:
                 phone = wc["phone"]
                 name = wc["name"]
+                c_type = wc.get("type", "User")
+                
+                # Exclude broadcast lists (Teams) from sync to prevent cluttering
+                if c_type == "Broadcast":
+                    continue
+
+                # Determine tag based on contact type
+                type_tag = None
+                if c_type == "Group":
+                    type_tag = "Group"
                 
                 # Check if contact already exists
                 existing = db.query(Contact).filter(Contact.phone == phone).first()
                 if existing:
-                    # Update name if it changed
+                    updated = False
                     if existing.name != name:
                         existing.name = name
+                        updated = True
+                    
+                    # Manage tags
+                    curr_tags = existing.tags or []
+                    if not isinstance(curr_tags, list):
+                        curr_tags = []
+                    
+                    # Remove any existing type tags to avoid duplicates
+                    curr_tags = [t for t in curr_tags if t not in ["Group", "Team", "User"]]
+                    if type_tag:
+                        curr_tags.append(type_tag)
+                    
+                    # Update tags if changed
+                    if existing.tags != curr_tags:
+                        existing.tags = curr_tags
+                        updated = True
+                    
+                    if updated:
                         db.add(existing)
                         synced_count += 1
                 else:
                     # Insert new contact
-                    contact = Contact(name=name, phone=phone, is_active=True)
+                    tags = [type_tag] if type_tag else []
+                    contact = Contact(name=name, phone=phone, is_active=True, tags=tags)
                     db.add(contact)
                     synced_count += 1
                     

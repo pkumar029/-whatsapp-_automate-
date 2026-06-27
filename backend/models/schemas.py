@@ -19,6 +19,10 @@ class ContactCreate(BaseModel):
     @classmethod
     def validate_phone(cls, v):
         cleaned = re.sub(r'[\s\-\(\)]', '', v)
+        if '@' in cleaned:
+            if not re.match(r'^[a-zA-Z0-9\.\-_]+@[a-zA-Z0-9\.\-_]+$', cleaned):
+                raise ValueError('Invalid WhatsApp JID format')
+            return cleaned
         if not re.match(r'^\+?[0-9]{7,15}$', cleaned):
             raise ValueError('Invalid phone number format')
         return cleaned
@@ -68,6 +72,8 @@ class MessageSend(BaseModel):
     contact_id: Optional[int] = None
     phone: Optional[str] = None
     message: str
+    media_url: Optional[str] = None
+    media_type: Optional[str] = None
 
     @field_validator('message')
     @classmethod
@@ -85,6 +91,8 @@ class MessageResponse(BaseModel):
     phone: str
     direction: str
     content: str
+    media_url: Optional[str] = None
+    media_type: Optional[str] = None
     status: str
     contact_name: Optional[str] = None
     error_message: Optional[str]
@@ -186,6 +194,7 @@ class LogListResponse(BaseModel):
 class WhatsAppConnectRequest(BaseModel):
     connection_type: str  # "dev", "meta", "bridge"
     phone: Optional[str] = None
+    link_method: Optional[str] = "qr"  # "qr" or "otp"
     meta_token: Optional[str] = None
     meta_phone_number_id: Optional[str] = None
     meta_business_account_id: Optional[str] = None
@@ -229,7 +238,95 @@ class DashboardSummary(BaseModel):
     sent_messages: int
     failed_messages: int
     active_automations: int
+    active_campaigns: Optional[int] = 0
+    queued_jobs: Optional[int] = 0
     recent_activity: Optional[List[Dict[str, Any]]] = []
+
+
+# ─── Campaign & Message Job Schemas ───────────────────────────
+class CampaignCreate(BaseModel):
+    name: str
+    delay_seconds: Optional[int] = 0
+    concurrency: Optional[int] = 1
+    contacts: List[int]
+    template: str
+    scheduled_at: datetime
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        if len(v.strip()) < 2:
+            raise ValueError('Name must be at least 2 characters')
+        return v.strip()
+
+    @field_validator('delay_seconds')
+    @classmethod
+    def validate_delay(cls, v):
+        if v < 0:
+            raise ValueError('Delay seconds must be non-negative')
+        return v
+
+    @field_validator('concurrency')
+    @classmethod
+    def validate_concurrency(cls, v):
+        if v < 1:
+            raise ValueError('Concurrency must be at least 1')
+        return v
+
+    @field_validator('template')
+    @classmethod
+    def validate_template(cls, v):
+        if not v.strip():
+            raise ValueError('Template body cannot be empty')
+        return v
+
+
+class MessageJobResponse(BaseModel):
+    id: int
+    campaign_id: Optional[int]
+    contact_id: Optional[int]
+    phone: str
+    body: str
+    scheduled_at: datetime
+    status: str
+    retry_count: int
+    next_retry_time: Optional[datetime]
+    lock_time: Optional[datetime]
+    sent_time: Optional[datetime]
+    provider_id: Optional[str]
+    failure_reason: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    contact_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CampaignResponse(BaseModel):
+    id: int
+    name: str
+    status: str
+    delay_seconds: int
+    concurrency: int
+    total_jobs: int
+    completed_jobs: int
+    failed_jobs: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CampaignListResponse(BaseModel):
+    campaigns: List[CampaignResponse]
+    total: int
+
+
+class JobListResponse(BaseModel):
+    jobs: List[MessageJobResponse]
+    total: int
 
 
 # ─── Common Response ──────────────────────────────────────────

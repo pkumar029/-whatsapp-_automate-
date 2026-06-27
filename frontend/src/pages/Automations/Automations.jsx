@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Zap, Plus, Play, Pause, Trash2, Edit2, Search, X, Check, ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
+import { 
+  Zap, Plus, Play, Pause, Trash2, Edit2, Search, X, Check, 
+  ChevronDown, ChevronUp, GripVertical, MessageSquare, Clock, 
+  Sliders, User, Users, FileText, HelpCircle 
+} from 'lucide-react'
 import { automationsApi } from '../../services/api'
 import { formatIST } from '../../utils/date'
 import { getErrorMessage } from '../../utils/error'
@@ -7,9 +11,133 @@ import { getErrorMessage } from '../../utils/error'
 const TRIGGER_TYPES = ['keyword', 'schedule', 'contact_added', 'message_received', 'manual']
 const STEP_TYPES = ['send_message', 'delay', 'condition', 'update_contact', 'webhook', 'log']
 
-// ─── Step Editor ──────────────────────────────────────────────
-// ─── Step Editor ──────────────────────────────────────────────
-function StepRow({ step, index, onUpdate, onDelete }) {
+// ─── Trigger Card Component ──────────────────────────────────
+function TriggerCard({ type, keyword, cron }) {
+  let label = "Manual Trigger"
+  let details = "Triggered manually by user or API request"
+  if (type === 'keyword') {
+    label = "Keyword Trigger"
+    details = `Incoming message matches "${keyword}"`
+  } else if (type === 'schedule') {
+    label = "Schedule Trigger"
+    details = `Cron schedule: "${cron}"`
+  } else if (type === 'contact_added') {
+    label = "Contact Added Trigger"
+    details = "Triggers when a new contact is synced"
+  } else if (type === 'message_received') {
+    label = "Message Received Trigger"
+    details = "Triggers on any incoming message"
+  }
+  
+  return (
+    <div style={{
+      background: 'rgba(139, 92, 246, 0.12)',
+      border: '1px dashed var(--accent-purple)',
+      borderRadius: 'var(--radius-md)',
+      padding: '12px 16px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 12,
+      width: '100%',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+    }}>
+      <div style={{
+        width: 32,
+        height: 32,
+        borderRadius: '50%',
+        background: 'var(--accent-purple)',
+        color: '#000',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0
+      }}>
+        <Zap size={15} />
+      </div>
+      <div>
+        <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          {label}
+        </div>
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: 2 }}>
+          {details}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Flow Arrow Connector ────────────────────────────────────
+function FlowArrow({ onInsert }) {
+  const [hovered, setHovered] = useState(false)
+  
+  return (
+    <div 
+      style={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        alignItems: 'center', 
+        justifyContent: 'center', 
+        margin: '4px 0',
+        position: 'relative',
+        height: 28,
+        width: '100%'
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <div style={{ 
+        width: 2, 
+        height: '100%', 
+        background: hovered ? 'var(--accent-primary)' : 'var(--border-primary)',
+        transition: 'background 0.2s'
+      }} />
+      
+      <div style={{ 
+        position: 'absolute',
+        bottom: 0,
+        width: 0,
+        height: 0,
+        borderLeft: '4px solid transparent',
+        borderRight: '4px solid transparent',
+        borderTop: `6px solid ${hovered ? 'var(--accent-primary)' : 'var(--text-muted)'}`,
+        transition: 'border-top-color 0.2s'
+      }} />
+      
+      {onInsert && (
+        <button 
+          type="button"
+          onClick={onInsert}
+          style={{
+            position: 'absolute',
+            background: 'var(--bg-tertiary)',
+            border: `1px solid ${hovered ? 'var(--accent-primary)' : 'var(--border-primary)'}`,
+            color: hovered ? 'var(--text-primary)' : 'var(--text-muted)',
+            borderRadius: '50%',
+            width: 18,
+            height: 18,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.15)',
+            zIndex: 5,
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            transition: 'all 0.2s',
+            padding: 0
+          }}
+          title="Insert step here"
+        >
+          <Plus size={10} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ─── Step Node Card Component ────────────────────────────────
+function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMoveDown }) {
   const [expanded, setExpanded] = useState(false)
   
   let config = {}
@@ -24,62 +152,153 @@ function StepRow({ step, index, onUpdate, onDelete }) {
     onUpdate({ ...step, config: newConfig })
   }
 
+  let stepIcon = <FileText size={14} />
+  let stepColor = 'var(--accent-blue)'
+  let stepBg = 'rgba(59, 130, 246, 0.12)'
+  let stepLabel = 'Step'
+  let stepSummary = ''
+
+  if (step.step_type === 'send_message') {
+    stepIcon = <MessageSquare size={14} />
+    stepColor = 'var(--accent-primary)'
+    stepBg = 'rgba(37, 211, 102, 0.12)'
+    stepLabel = 'Send WhatsApp Message'
+    stepSummary = config.message ? `"${config.message.slice(0, 36)}${config.message.length > 36 ? '...' : ''}"` : 'Configure message text'
+  } else if (step.step_type === 'delay') {
+    stepIcon = <Clock size={14} />
+    stepColor = 'var(--accent-amber)'
+    stepBg = 'rgba(245, 158, 11, 0.12)'
+    stepLabel = 'Wait Delay'
+    stepSummary = config.seconds ? `Pause for ${config.seconds} seconds` : 'Set delay time'
+  } else if (step.step_type === 'condition') {
+    stepIcon = <Sliders size={14} />
+    stepColor = 'var(--accent-rose)'
+    stepBg = 'rgba(239, 68, 68, 0.12)'
+    stepLabel = 'If/Else Condition'
+    stepSummary = config.field ? `Check if contact.${config.field} ${config.operator || 'equals'} "${config.value || ''}"` : 'Set matching rule'
+  } else if (step.step_type === 'update_contact') {
+    stepIcon = <User size={14} />
+    stepColor = 'var(--accent-indigo)'
+    stepBg = 'rgba(99, 102, 241, 0.12)'
+    stepLabel = 'Update Contact'
+    stepSummary = (config.name || config.email) ? `Set name: ${config.name || '—'}, email: ${config.email || '—'}` : 'Configure contact updates'
+  } else if (step.step_type === 'webhook') {
+    stepIcon = <Zap size={14} stroke="var(--accent-purple)" />
+    stepColor = 'var(--accent-purple)'
+    stepBg = 'rgba(139, 92, 246, 0.12)'
+    stepLabel = 'Trigger Webhook'
+    stepSummary = config.url ? `POST to ${config.url.slice(0, 32)}${config.url.length > 32 ? '...' : ''}` : 'Configure API endpoint'
+  } else if (step.step_type === 'log') {
+    stepIcon = <FileText size={14} />
+    stepColor = 'var(--text-secondary)'
+    stepBg = 'rgba(156, 163, 175, 0.12)'
+    stepLabel = 'Write Activity Log'
+    stepSummary = config.message ? `Log: "${config.message}"` : 'Log text'
+  }
+
   return (
-    <div style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-md)', marginBottom: 8 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', cursor: 'pointer' }} onClick={() => setExpanded(!expanded)}>
-        <GripVertical size={14} color="var(--text-muted)" />
-        <div style={{ width: 24, height: 24, borderRadius: '50%', background: 'var(--accent-purple-muted)', color: 'var(--accent-purple)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{index + 1}</div>
-        <select 
-          className="form-input" 
-          style={{ flex: 1, padding: '6px 10px' }} 
-          value={step.step_type} 
-          onClick={e => e.stopPropagation()} 
-          onChange={e => {
-            const nextType = e.target.value
-            let defaultConf = {}
-            if (nextType === 'delay') defaultConf = { seconds: 1 }
-            else if (nextType === 'send_message') defaultConf = { message: '' }
-            else if (nextType === 'condition') defaultConf = { field: 'name', operator: 'equals', value: '' }
-            else if (nextType === 'update_contact') defaultConf = { name: '', email: '' }
-            else if (nextType === 'webhook') defaultConf = { url: '' }
-            else if (nextType === 'log') defaultConf = { message: '' }
-            
-            onUpdate({ ...step, step_type: nextType, config: defaultConf })
-          }}
-        >
-          {STEP_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
-        </select>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          <button className="btn btn-danger btn-icon btn-sm" onClick={e => { e.stopPropagation(); onDelete() }}><Trash2 size={12} /></button>
+    <div style={{ 
+      background: 'var(--bg-tertiary)', 
+      border: `1px solid ${expanded ? stepColor : 'var(--border-primary)'}`, 
+      borderRadius: 'var(--radius-md)', 
+      boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+      width: '100%',
+      transition: 'all 0.2s'
+    }}>
+      <div 
+        style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: 12, 
+          padding: '10px 14px', 
+          cursor: 'pointer',
+          borderBottom: expanded ? '1px solid var(--border-primary)' : 'none'
+        }} 
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div style={{ 
+          width: 30, 
+          height: 30, 
+          borderRadius: 'var(--radius-md)', 
+          background: stepBg, 
+          color: stepColor, 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          flexShrink: 0 
+        }}>
+          {stepIcon}
+        </div>
+        
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>Step {index + 1}: {stepLabel}</span>
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {stepSummary}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} onClick={e => e.stopPropagation()}>
+          {index > 0 && (
+            <button type="button" className="btn btn-secondary btn-icon btn-sm" onClick={onMoveUp} title="Move Up" style={{ height: 26, width: 26 }}><ChevronUp size={12} /></button>
+          )}
+          {index < totalSteps - 1 && (
+            <button type="button" className="btn btn-secondary btn-icon btn-sm" onClick={onMoveDown} title="Move Down" style={{ height: 26, width: 26 }}><ChevronDown size={12} /></button>
+          )}
+          <button type="button" className="btn btn-danger btn-icon btn-sm" onClick={onDelete} title="Delete Step" style={{ height: 26, width: 26 }}><Trash2 size={12} /></button>
         </div>
       </div>
+
       {expanded && (
-        <div style={{ padding: '0 14px 14px' }}>
+        <div style={{ padding: 14 }}>
+          <div className="form-group" style={{ marginBottom: 12 }}>
+            <label className="form-label" style={{ fontSize: 11 }}>Action Type</label>
+            <select 
+              className="form-input form-select" 
+              style={{ padding: '6px 10px', fontSize: 12, height: 32 }} 
+              value={step.step_type} 
+              onChange={e => {
+                const nextType = e.target.value
+                let defaultConf = {}
+                if (nextType === 'delay') defaultConf = { seconds: 1 }
+                else if (nextType === 'send_message') defaultConf = { message: '' }
+                else if (nextType === 'condition') defaultConf = { field: 'name', operator: 'equals', value: '' }
+                else if (nextType === 'update_contact') defaultConf = { name: '', email: '' }
+                else if (nextType === 'webhook') defaultConf = { url: '' }
+                else if (nextType === 'log') defaultConf = { message: '' }
+                
+                onUpdate({ ...step, step_type: nextType, config: defaultConf })
+              }}
+            >
+              {STEP_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
+            </select>
+          </div>
+
           {step.step_type === 'send_message' && (
             <div>
               <div className="form-group" style={{ marginBottom: 10 }}>
-                <label className="form-label" style={{ fontSize: 12 }}>Message Text *</label>
+                <label className="form-label" style={{ fontSize: 11 }}>Message Text *</label>
                 <textarea 
                   className="form-input form-textarea" 
-                  style={{ minHeight: 60, fontSize: 13 }}
+                  style={{ minHeight: 60, fontSize: 12, padding: 8 }}
                   value={config.message || ''} 
                   onChange={e => updateConfigField('message', e.target.value)}
                   placeholder="e.g. Hello {{name}}! Welcome to our service."
                 />
-                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2, display: 'block' }}>
                   Use `{{name}}` or `{{phone}}` to insert contact details dynamically.
                 </span>
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: 12 }}>Recipient Phone Number (Optional)</label>
+                <label className="form-label" style={{ fontSize: 11 }}>Recipient Phone (Optional)</label>
                 <input 
                   type="text" 
                   className="form-input" 
-                  style={{ padding: '6px 10px', fontSize: 13 }}
+                  style={{ padding: '6px 10px', fontSize: 12, height: 32 }}
                   value={config.phone || ''} 
                   onChange={e => updateConfigField('phone', e.target.value)}
-                  placeholder="Leave empty to use the active contact's phone"
+                  placeholder="Leave empty to use active contact's phone"
                 />
               </div>
             </div>
@@ -87,26 +306,25 @@ function StepRow({ step, index, onUpdate, onDelete }) {
 
           {step.step_type === 'delay' && (
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" style={{ fontSize: 12 }}>Delay Duration (Seconds) *</label>
+              <label className="form-label" style={{ fontSize: 11 }}>Delay Duration (Seconds) *</label>
               <input 
                 type="number" 
                 className="form-input" 
-                style={{ padding: '6px 10px', fontSize: 13 }}
+                style={{ padding: '6px 10px', fontSize: 12, height: 32 }}
                 min="1" 
                 value={config.seconds || 1} 
                 onChange={e => updateConfigField('seconds', parseInt(e.target.value) || 1)}
-                placeholder="e.g. 5"
               />
             </div>
           )}
 
           {step.step_type === 'condition' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: 12 }}>Field to Check *</label>
+                <label className="form-label" style={{ fontSize: 11 }}>Field *</label>
                 <select 
                   className="form-input form-select" 
-                  style={{ padding: '6px 10px', fontSize: 13 }}
+                  style={{ padding: '6px 10px', fontSize: 12, height: 32 }}
                   value={config.field || 'name'} 
                   onChange={e => updateConfigField('field', e.target.value)}
                 >
@@ -117,54 +335,52 @@ function StepRow({ step, index, onUpdate, onDelete }) {
                 </select>
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: 12 }}>Operator *</label>
+                <label className="form-label" style={{ fontSize: 11 }}>Operator *</label>
                 <select 
                   className="form-input form-select" 
-                  style={{ padding: '6px 10px', fontSize: 13 }}
+                  style={{ padding: '6px 10px', fontSize: 12, height: 32 }}
                   value={config.operator || 'equals'} 
                   onChange={e => updateConfigField('operator', e.target.value)}
                 >
                   <option value="equals">Equals</option>
-                  <option value="not_equals">Does Not Equal</option>
+                  <option value="not_equals">Not Equals</option>
                   <option value="contains">Contains</option>
                 </select>
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: 12 }}>Match Value *</label>
+                <label className="form-label" style={{ fontSize: 11 }}>Value *</label>
                 <input 
                   type="text" 
                   className="form-input" 
-                  style={{ padding: '6px 10px', fontSize: 13 }}
+                  style={{ padding: '6px 10px', fontSize: 12, height: 32 }}
                   value={config.value || ''} 
                   onChange={e => updateConfigField('value', e.target.value)}
-                  placeholder="e.g. John"
+                  placeholder="e.g. Sales"
                 />
               </div>
             </div>
           )}
 
           {step.step_type === 'update_contact' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: 12 }}>Update Name</label>
+                <label className="form-label" style={{ fontSize: 11 }}>Update Name</label>
                 <input 
                   type="text" 
                   className="form-input" 
-                  style={{ padding: '6px 10px', fontSize: 13 }}
+                  style={{ padding: '6px 10px', fontSize: 12, height: 32 }}
                   value={config.name || ''} 
                   onChange={e => updateConfigField('name', e.target.value)}
-                  placeholder="Enter a name"
                 />
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: 12 }}>Update Email</label>
+                <label className="form-label" style={{ fontSize: 11 }}>Update Email</label>
                 <input 
                   type="email" 
                   className="form-input" 
-                  style={{ padding: '6px 10px', fontSize: 13 }}
+                  style={{ padding: '6px 10px', fontSize: 12, height: 32 }}
                   value={config.email || ''} 
                   onChange={e => updateConfigField('email', e.target.value)}
-                  placeholder="example@gmail.com"
                 />
               </div>
             </div>
@@ -172,33 +388,52 @@ function StepRow({ step, index, onUpdate, onDelete }) {
 
           {step.step_type === 'webhook' && (
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" style={{ fontSize: 12 }}>Webhook URL *</label>
+              <label className="form-label" style={{ fontSize: 11 }}>Webhook URL *</label>
               <input 
                 type="url" 
                 className="form-input" 
-                style={{ padding: '6px 10px', fontSize: 13 }}
+                style={{ padding: '6px 10px', fontSize: 12, height: 32 }}
                 value={config.url || ''} 
                 onChange={e => updateConfigField('url', e.target.value)}
-                placeholder="e.g. https://api.mycrm.com/webhook"
+                placeholder="https://mycrm.com/webhook"
               />
             </div>
           )}
 
           {step.step_type === 'log' && (
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" style={{ fontSize: 12 }}>Log message text *</label>
+              <label className="form-label" style={{ fontSize: 11 }}>Log Message *</label>
               <input 
                 type="text" 
                 className="form-input" 
-                style={{ padding: '6px 10px', fontSize: 13 }}
+                style={{ padding: '6px 10px', fontSize: 12, height: 32 }}
                 value={config.message || ''} 
                 onChange={e => updateConfigField('message', e.target.value)}
-                placeholder="e.g. Delay complete. Continuing workflow..."
               />
             </div>
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── End Node Component ──────────────────────────────────────
+function EndNode() {
+  return (
+    <div style={{
+      background: 'rgba(255, 255, 255, 0.02)',
+      border: '1px solid var(--border-primary)',
+      borderRadius: 'var(--radius-md)',
+      padding: '8px 12px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '100%'
+    }}>
+      <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+        End Workflow Flow
+      </span>
     </div>
   )
 }
@@ -243,14 +478,22 @@ function AutomationModal({ automation, onClose, onSave }) {
     }
   }, [automation])
 
-  const addStep = () => setSteps([...steps, { step_type: 'send_message', step_order: steps.length + 1, config: {} }])
+  const addStep = () => {
+    setSteps([...steps, { step_type: 'send_message', step_order: steps.length + 1, config: {} }])
+  }
+
+  const insertStepAt = (index) => {
+    const newSteps = [...steps]
+    newSteps.splice(index, 0, { step_type: 'send_message', step_order: index + 1, config: {} })
+    const reordered = newSteps.map((s, idx) => ({ ...s, step_order: idx + 1 }))
+    setSteps(reordered)
+  }
 
   const handleSave = async (e) => {
     e.preventDefault()
     if (!form.name.trim()) { setError('Automation name is required.'); return }
     setSaving(true); setError('')
     try {
-      // Parse trigger_config
       let parsedTriggerConfig = {}
       if (form.trigger_type === 'keyword') {
         if (!triggerKeyword.trim()) {
@@ -268,7 +511,6 @@ function AutomationModal({ automation, onClose, onSave }) {
         parsedTriggerConfig = { cron: triggerCron.trim() }
       }
 
-      // Parse steps config
       const parsedSteps = steps.map((s, idx) => {
         let parsedConfig = {}
         if (typeof s.config === 'string') {
@@ -280,7 +522,6 @@ function AutomationModal({ automation, onClose, onSave }) {
         } else {
           parsedConfig = s.config || {}
         }
-        // Remove DB internal keys that shouldn't be resent/are immutable
         const { id, automation_id, created_at, updated_at, ...cleanStep } = s
         return {
           ...cleanStep,
@@ -373,25 +614,58 @@ function AutomationModal({ automation, onClose, onSave }) {
               ℹ️ Triggers automatically on any incoming message. No configuration required.
             </div>
           )}
+          
           <div style={{ borderTop: '1px solid var(--border-primary)', margin: '16px 0', paddingTop: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Steps ({steps.length})</span>
+              <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Visual Workflow Canvas</span>
               <button type="button" className="btn btn-secondary btn-sm" onClick={addStep}><Plus size={14} /> Add Step</button>
             </div>
-            {steps.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)', border: '2px dashed var(--border-primary)', borderRadius: 'var(--radius-md)' }}>
-                No steps yet — click "Add Step" to build your workflow
-              </div>
-            ) : (
-              steps.map((step, i) => (
-                <StepRow
-                  key={i} step={step} index={i}
-                  onUpdate={updated => setSteps(steps.map((s, idx) => idx === i ? updated : s))}
-                  onDelete={() => setSteps(steps.filter((_, idx) => idx !== i))}
-                />
-              ))
-            )}
+            
+            <div style={{ 
+              display: 'flex', 
+              flexDirection: 'column', 
+              alignItems: 'center', 
+              background: 'var(--bg-secondary)', 
+              borderRadius: 'var(--radius-lg)', 
+              border: '1px solid var(--border-primary)', 
+              padding: 16,
+              gap: 0
+            }}>
+              <TriggerCard type={form.trigger_type} keyword={triggerKeyword} cron={triggerCron} />
+              
+              {steps.length > 0 && <FlowArrow onInsert={() => insertStepAt(0)} />}
+              
+              {steps.map((step, i) => (
+                <div key={i} style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <StepNode
+                    step={step}
+                    index={i}
+                    totalSteps={steps.length}
+                    onUpdate={updated => setSteps(steps.map((s, idx) => idx === i ? updated : s))}
+                    onDelete={() => setSteps(steps.filter((_, idx) => idx !== i))}
+                    onMoveUp={() => {
+                      const newSteps = [...steps]
+                      const temp = newSteps[i]
+                      newSteps[i] = newSteps[i - 1]
+                      newSteps[i - 1] = temp
+                      setSteps(newSteps)
+                    }}
+                    onMoveDown={() => {
+                      const newSteps = [...steps]
+                      const temp = newSteps[i]
+                      newSteps[i] = newSteps[i + 1]
+                      newSteps[i + 1] = temp
+                      setSteps(newSteps)
+                    }}
+                  />
+                  <FlowArrow onInsert={() => insertStepAt(i + 1)} />
+                </div>
+              ))}
+              
+              <EndNode />
+            </div>
           </div>
+          
           <div className="modal-footer">
             <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
             <button type="submit" className="btn btn-primary" disabled={saving}>

@@ -2,6 +2,7 @@
 WhatsApp Routes — Connect, disconnect, status, send message
 """
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from typing import Optional, List
 from sqlalchemy.orm import Session
 from database.connection import get_db
 from services import whatsapp_service
@@ -70,6 +71,8 @@ logger = logging.getLogger(__name__)
 class WebhookPayload(BaseModel):
     phone: str
     content: str
+    name: Optional[str] = None
+    tags: Optional[List[str]] = None
 
 @router.post("/webhook")
 async def whatsapp_webhook(payload: WebhookPayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
@@ -84,9 +87,16 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
         if not contact:
             # Create a contact dynamically
             from models.schemas import ContactCreate
-            name = f"WhatsApp User {phone}"
-            contact_data = ContactCreate(name=name, phone=phone)
+            name = payload.name or f"WhatsApp User {phone}"
+            contact_data = ContactCreate(name=name, phone=phone, tags=payload.tags)
             contact = contacts_service.create_contact(db, contact_data)
+        else:
+            # If contact already exists but has a placeholder name, update it with the real name
+            if payload.name and (contact.name.startswith("WhatsApp User") or contact.name.startswith("Unnamed") or contact.name == contact.phone):
+                contact.name = payload.name
+                db.add(contact)
+                db.commit()
+                db.refresh(contact)
             
         # 2. Save message
         msg = Message(
@@ -101,7 +111,7 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
         db.commit()
         db.refresh(msg)
         
-        logger.info(f"Webhook received and saved message from {phone}")
+        logger.info(f"Webhook received and saved message from {phone} ({contact.name})")
 
         # 3. Trigger matching active automations in background
         from models.models import Automation, TriggerType

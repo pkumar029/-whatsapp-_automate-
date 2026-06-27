@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react'
+import { whatsappApi } from '../services/api'
 
 const AppContext = createContext()
 
@@ -27,22 +28,26 @@ export function AppProvider({ children }) {
     const saved = localStorage.getItem('wa_profile')
     if (saved) {
       try {
-        return JSON.parse(saved)
+        const parsed = JSON.parse(saved)
+        if (parsed && parsed.name && parsed.name !== 'Admin User') {
+          return parsed
+        }
       } catch (e) {
         // Fallback to default if JSON parse fails
       }
     }
     return {
-      name: 'Admin User',
-      email: 'admin@example.com',
-      company: 'WA Automate Inc.',
-      role: 'Administrator'
+      name: '',
+      email: '',
+      company: '',
+      role: '',
+      isProfileConfigured: false
     }
   })
 
   const updateProfile = (updatedFields) => {
     setProfileState(prev => {
-      const next = { ...prev, ...updatedFields }
+      const next = { ...prev, ...updatedFields, isProfileConfigured: true }
       localStorage.setItem('wa_profile', JSON.stringify(next))
       return next
     })
@@ -64,6 +69,27 @@ export function AppProvider({ children }) {
     })
   }
 
+  const [sessionStatus, setSessionStatus] = useState({ status: 'disconnected' })
+  const [loadingSession, setLoadingSession] = useState(true)
+
+  const refreshSessionStatus = async () => {
+    try {
+      const res = await whatsappApi.getStatus()
+      setSessionStatus(res.data)
+      return res.data
+    } catch (err) {
+      setSessionStatus({ status: 'disconnected' })
+    } finally {
+      setLoadingSession(false)
+    }
+  }
+
+  useEffect(() => {
+    refreshSessionStatus()
+    const interval = setInterval(refreshSessionStatus, 8000)
+    return () => clearInterval(interval)
+  }, [])
+
   return (
     <AppContext.Provider value={{
       theme,
@@ -71,7 +97,11 @@ export function AppProvider({ children }) {
       toggleTheme,
       profile,
       updateProfile,
-      changePassword
+      changePassword,
+      sessionStatus,
+      setSessionStatus,
+      refreshSessionStatus,
+      loadingSession
     }}>
       {children}
     </AppContext.Provider>

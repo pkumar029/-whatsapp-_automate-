@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from database.connection import get_db
 from services import contacts_service, messages_service, automations_service
 from models.schemas import DashboardSummary
-from models.models import AutomationLog, LogStatus
+from models.models import AutomationLog, LogStatus, Campaign, CampaignStatus, MessageJob, JobStatus
+from sqlalchemy import func
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -18,6 +19,10 @@ async def get_summary(db: Session = Depends(get_db)):
     sent_messages = messages_service.get_sent_count(db)
     failed_messages = messages_service.get_failed_count(db)
     active_automations = automations_service.get_active_automations_count(db)
+    
+    # Active campaigns and queued message jobs
+    active_campaigns = db.query(func.count(Campaign.id)).filter(Campaign.status == CampaignStatus.active).scalar() or 0
+    queued_jobs = db.query(func.count(MessageJob.id)).filter(MessageJob.status == JobStatus.queued).scalar() or 0
 
     # Recent activity from logs
     recent_logs = db.query(AutomationLog).order_by(
@@ -51,5 +56,7 @@ async def get_summary(db: Session = Depends(get_db)):
         "sent_messages": sent_messages,
         "failed_messages": failed_messages,
         "active_automations": active_automations,
+        "active_campaigns": active_campaigns,
+        "queued_jobs": queued_jobs,
         "recent_activity": recent_activity,
     }

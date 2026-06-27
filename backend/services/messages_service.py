@@ -70,6 +70,8 @@ def send_message(db: Session, data: MessageSend) -> Message:
         phone=phone,
         direction=MessageDirection.outbound,
         content=data.message,
+        media_url=data.media_url,
+        media_type=data.media_type,
         status=MessageStatus.pending,
     )
     db.add(msg)

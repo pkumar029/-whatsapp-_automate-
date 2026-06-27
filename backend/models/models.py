@@ -62,6 +62,23 @@ class LogStatus(str, enum.Enum):
     partial = "partial"
 
 
+class CampaignStatus(str, enum.Enum):
+    active = "active"
+    paused = "paused"
+    completed = "completed"
+    cancelled = "cancelled"
+
+
+class JobStatus(str, enum.Enum):
+    queued = "queued"
+    sending = "sending"
+    sent = "sent"
+    delivered = "delivered"
+    read = "read"
+    failed = "failed"
+    cancelled = "cancelled"
+
+
 # ─── User ─────────────────────────────────────────────────────
 class User(Base):
     __tablename__ = "users"
@@ -84,7 +101,7 @@ class WhatsappSession(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
-    phone = Column(String(20), nullable=True)
+    phone = Column(String(100), nullable=True)
     status = Column(Enum(SessionStatus), default=SessionStatus.disconnected, nullable=False)
     session_data = Column(JSON, nullable=True)
     qr_code = Column(Text, nullable=True)
@@ -108,7 +125,7 @@ class Contact(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
-    phone = Column(String(20), unique=True, nullable=False)
+    phone = Column(String(100), unique=True, nullable=False)
     email = Column(String(150), nullable=True)
     notes = Column(Text, nullable=True)
     tags = Column(JSON, nullable=True)
@@ -132,7 +149,7 @@ class Message(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     contact_id = Column(Integer, ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True)
-    phone = Column(String(20), nullable=False)
+    phone = Column(String(100), nullable=False)
     direction = Column(Enum(MessageDirection), nullable=False)
     content = Column(Text, nullable=False)
     media_url = Column(String(500), nullable=True)
@@ -227,4 +244,61 @@ class AutomationLog(Base):
         Index("idx_log_automation", "automation_id"),
         Index("idx_log_status", "status"),
         Index("idx_log_started", "started_at"),
+    )
+
+
+# ─── Campaign ─────────────────────────────────────────────────
+class Campaign(Base):
+    __tablename__ = "campaigns"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(150), nullable=False)
+    status = Column(Enum(CampaignStatus), default=CampaignStatus.active, nullable=False)
+    delay_seconds = Column(Integer, default=0, nullable=False)
+    concurrency = Column(Integer, default=1, nullable=False)
+    total_jobs = Column(Integer, default=0, nullable=False)
+    completed_jobs = Column(Integer, default=0, nullable=False)
+    failed_jobs = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    jobs = relationship("MessageJob", back_populates="campaign", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_campaigns_status", "status"),
+    )
+
+
+# ─── Message Job ──────────────────────────────────────────────
+class MessageJob(Base):
+    __tablename__ = "message_jobs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    campaign_id = Column(Integer, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=True)
+    contact_id = Column(Integer, ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True)
+    phone = Column(String(100), nullable=False)
+    body = Column(Text, nullable=False)
+    scheduled_at = Column(DateTime, nullable=False)
+    status = Column(Enum(JobStatus), default=JobStatus.queued, nullable=False)
+    retry_count = Column(Integer, default=0, nullable=False)
+    next_retry_time = Column(DateTime, nullable=True)
+    lock_time = Column(DateTime, nullable=True)
+    sent_time = Column(DateTime, nullable=True)
+    provider_id = Column(String(100), nullable=True)
+    failure_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    campaign = relationship("Campaign", back_populates="jobs")
+    contact = relationship("Contact")
+
+    __table_args__ = (
+        Index("uq_campaign_contact", "campaign_id", "contact_id", unique=True),
+        Index("uq_campaign_phone", "campaign_id", "phone", unique=True),
+        Index("idx_jobs_campaign", "campaign_id"),
+        Index("idx_jobs_contact", "contact_id"),
+        Index("idx_jobs_status", "status"),
+        Index("idx_jobs_scheduled_at", "scheduled_at"),
+        Index("idx_jobs_next_retry", "next_retry_time"),
+        Index("idx_jobs_lock_time", "lock_time"),
     )

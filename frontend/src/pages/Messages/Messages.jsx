@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { 
   MessageSquare, Send, Search, Phone, Video, Paperclip, 
   FileText, Image as ImageIcon, MapPin, X, HelpCircle, 
-  Check, CheckCheck, Clock, AlertCircle, User 
+  Check, CheckCheck, Clock, AlertCircle, User, WifiOff, RefreshCw,
+  Users, Megaphone, Play, Pause
 } from 'lucide-react'
-import { messagesApi, contactsApi } from '../../services/api'
+import { messagesApi, contactsApi, whatsappApi } from '../../services/api'
+import { Link } from 'react-router-dom'
 import { formatISTTime } from '../../utils/date'
 import { getErrorMessage } from '../../utils/error'
 
@@ -18,6 +20,20 @@ export default function Messages() {
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [newMessage, setNewMessage] = useState('')
   
+  // WhatsApp connection states
+  const [sessionStatus, setSessionStatus] = useState({ status: 'disconnected' })
+  const [loadingSession, setLoadingSession] = useState(true)
+
+  useEffect(() => {
+    whatsappApi.getStatus().then(res => {
+      setSessionStatus(res.data)
+      setLoadingSession(false)
+    }).catch(() => {
+      setSessionStatus({ status: 'disconnected' })
+      setLoadingSession(false)
+    })
+  }, [])
+  
   // Modals / Dropdowns
   const [showAttachMenu, setShowAttachMenu] = useState(false)
   const [callModal, setCallModal] = useState(null) // 'voice' | 'video' | null
@@ -27,19 +43,22 @@ export default function Messages() {
   const [attachName, setAttachName] = useState('')
   const [attachUrl, setAttachUrl] = useState('')
 
+  const [lightboxImg, setLightboxImg] = useState(null)
   const chatEndRef = useRef(null)
   const fileInputRef = useRef(null)
   const imageInputRef = useRef(null)
+  const audioInputRef = useRef(null)
 
   const handleFileChange = (e, type) => {
     const file = e.target.files[0]
     if (!file) return
     
-    const typeLabel = type === 'file' ? '📄 Document' : '🖼️ Image'
+    const objectUrl = URL.createObjectURL(file)
+    const typeLabel = type === 'file' ? '📄 Document' : (type === 'audio' ? '🎵 Audio' : '🖼️ Image')
     const simulatedMsg = `${typeLabel}: ${file.name}`
     
     handleSend(simulatedMsg, {
-      url: `file://${file.name}`,
+      url: objectUrl,
       type: type
     })
     
@@ -153,6 +172,38 @@ export default function Messages() {
     return <Clock size={14} color="var(--text-muted)" />
   }
 
+  if (loadingSession) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 'calc(100vh - 120px)', color: 'var(--text-muted)', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-primary)' }}>
+        <RefreshCw className="animate-spin" size={24} style={{ marginRight: 8, animation: 'spin 1s linear infinite' }} /> Loading connection state...
+      </div>
+    )
+  }
+
+  if (sessionStatus.status !== 'connected') {
+    return (
+      <div>
+        <div className="page-header">
+          <div>
+            <h2 className="page-title">Messages</h2>
+            <p className="page-subtitle">WhatsApp Direct Chat Room</p>
+          </div>
+        </div>
+        
+        <div className="card empty-state" style={{ padding: '60px 20px', textAlign: 'center', marginTop: 20 }}>
+          <WifiOff size={48} style={{ margin: '0 auto 16px', color: 'var(--accent-rose)' }} />
+          <h3>WhatsApp Connection Required</h3>
+          <p style={{ maxWidth: 420, margin: '8px auto 20px', fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            To view chat history and compose outbound direct messages, please connect your WhatsApp account. Linking your device allows the system to establish a live communication session.
+          </p>
+          <Link to="/settings" className="btn btn-primary">
+            Go to Settings & Connect
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={{ height: 'calc(100vh - 120px)', display: 'flex', gap: 16, background: 'var(--bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-primary)', overflow: 'hidden' }}>
       
@@ -186,6 +237,18 @@ export default function Messages() {
           ) : (
             filteredContacts.map(c => {
               const isSelected = selectedContact?.id === c.id
+              const isGroup = c.tags?.includes('Group')
+              const isTeam = c.tags?.includes('Team')
+              
+              let avatarContent;
+              if (isGroup) {
+                avatarContent = <Users size={16} />
+              } else if (isTeam) {
+                avatarContent = <Megaphone size={16} />
+              } else {
+                avatarContent = c.name[0]?.toUpperCase() || <User size={16} />
+              }
+
               return (
                 <div 
                   key={c.id}
@@ -202,13 +265,25 @@ export default function Messages() {
                   }}
                 >
                   {/* Avatar */}
-                  <div style={{ width: 40, height: 40, borderRadius: '50%', background: isSelected ? 'var(--accent-primary)' : 'var(--bg-hover)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: isSelected ? '#000' : 'var(--accent-primary)', fontWeight: 700 }}>
-                    {c.name[0]?.toUpperCase()}
+                  <div style={{ 
+                    width: 40, 
+                    height: 40, 
+                    borderRadius: '50%', 
+                    background: isSelected ? 'var(--accent-primary)' : (isGroup ? 'rgba(99, 102, 241, 0.15)' : (isTeam ? 'rgba(45, 212, 191, 0.15)' : 'var(--bg-hover)')), 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    color: isSelected ? '#000' : (isGroup ? 'rgb(165, 180, 252)' : (isTeam ? 'rgb(153, 246, 228)' : 'var(--accent-primary)')), 
+                    fontWeight: 700 
+                  }}>
+                    {avatarContent}
                   </div>
                   {/* Name/Phone */}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 'var(--font-size-sm)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 'var(--font-size-sm)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: 6 }}>
                       {c.name}
+                      {isGroup && <span style={{ fontSize: '8px', background: 'rgba(99, 102, 241, 0.15)', color: 'rgb(165, 180, 252)', padding: '1px 4px', borderRadius: 3, fontWeight: 700 }}>GROUP</span>}
+                      {isTeam && <span style={{ fontSize: '8px', background: 'rgba(45, 212, 191, 0.15)', color: 'rgb(153, 246, 228)', padding: '1px 4px', borderRadius: 3, fontWeight: 700 }}>TEAM</span>}
                     </div>
                     <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
                       {c.phone}
@@ -229,15 +304,27 @@ export default function Messages() {
             {/* Chat Window Header */}
             <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border-primary)', background: 'var(--bg-tertiary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ width: 38, height: 38, borderRadius: '50%', background: 'var(--accent-primary-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-primary)', fontWeight: 700 }}>
-                  {selectedContact.name[0]?.toUpperCase()}
+                <div style={{ 
+                  width: 38, 
+                  height: 38, 
+                  borderRadius: '50%', 
+                  background: selectedContact.tags?.includes('Group') ? 'rgba(99, 102, 241, 0.15)' : (selectedContact.tags?.includes('Team') ? 'rgba(45, 212, 191, 0.15)' : 'var(--accent-primary-muted)'), 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  color: selectedContact.tags?.includes('Group') ? 'rgb(165, 180, 252)' : (selectedContact.tags?.includes('Team') ? 'rgb(153, 246, 228)' : 'var(--accent-primary)'), 
+                  fontWeight: 700 
+                }}>
+                  {selectedContact.tags?.includes('Group') ? <Users size={16} /> : (selectedContact.tags?.includes('Team') ? <Megaphone size={16} /> : (selectedContact.name[0]?.toUpperCase() || <User size={16} />))}
                 </div>
                 <div>
-                  <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 'var(--font-size-sm)' }}>
+                  <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 'var(--font-size-sm)', display: 'flex', alignItems: 'center', gap: 6 }}>
                     {selectedContact.name}
+                    {selectedContact.tags?.includes('Group') && <span style={{ fontSize: '8px', background: 'rgba(99, 102, 241, 0.15)', color: 'rgb(165, 180, 252)', padding: '1px 4px', borderRadius: 3, fontWeight: 700 }}>GROUP</span>}
+                    {selectedContact.tags?.includes('Team') && <span style={{ fontSize: '8px', background: 'rgba(45, 212, 191, 0.15)', color: 'rgb(153, 246, 228)', padding: '1px 4px', borderRadius: 3, fontWeight: 700 }}>TEAM</span>}
                   </div>
-                  <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--accent-primary)' }}>
-                    Active WhatsApp Chat
+                  <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>
+                    {selectedContact.phone} &bull; {selectedContact.tags?.includes('Group') ? 'WhatsApp Group Chat' : (selectedContact.tags?.includes('Team') ? 'WhatsApp Broadcast List' : 'Active WhatsApp Chat')}
                   </div>
                 </div>
               </div>
@@ -293,6 +380,66 @@ export default function Messages() {
                         <div style={{ fontSize: 'var(--font-size-sm)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.4 }}>
                           {m.content}
                         </div>
+
+                        {/* Media Preview */}
+                        {m.media_type && (
+                          <div style={{ marginTop: 8 }}>
+                            {m.media_type === 'image' && (
+                              <div style={{ position: 'relative', cursor: 'zoom-in', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border-primary)' }} onClick={() => setLightboxImg(m.media_url)}>
+                                <img 
+                                  src={m.media_url} 
+                                  alt="Preview" 
+                                  style={{ width: '100%', maxHeight: 180, objectFit: 'cover', display: 'block' }}
+                                  onError={(e) => {
+                                    e.target.src = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500&auto=format&fit=crop&q=60'
+                                  }}
+                                />
+                              </div>
+                            )}
+                            {m.media_type === 'audio' && (
+                              <audio 
+                                controls 
+                                src={m.media_url} 
+                                style={{ width: '100%', minWidth: 200, height: 40, marginTop: 4 }}
+                              />
+                            )}
+                            {m.media_type === 'file' && (
+                              <div style={{ 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                gap: 10, 
+                                padding: '8px 10px', 
+                                background: 'var(--bg-secondary)', 
+                                border: '1px solid var(--border-primary)', 
+                                borderRadius: 'var(--radius-md)',
+                                cursor: 'pointer'
+                              }} onClick={() => {
+                                window.open(m.media_url, '_blank');
+                              }}>
+                                <div style={{ 
+                                  width: 32, 
+                                  height: 32, 
+                                  borderRadius: 'var(--radius-sm)', 
+                                  background: 'rgba(239, 68, 68, 0.1)', 
+                                  display: 'flex', 
+                                  alignItems: 'center', 
+                                  justifyContent: 'center',
+                                  color: '#ef4444'
+                                }}>
+                                  <FileText size={16} />
+                                </div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {m.content?.replace(/^📄 Document: /, '') || 'Document.pdf'}
+                                  </div>
+                                  <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                                    Document &bull; Click to open
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
                         
                         {/* Time & Delivery Status */}
                         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginTop: 4, fontSize: '10px', color: 'var(--text-muted)' }}>
@@ -326,6 +473,7 @@ export default function Messages() {
                     {[
                       { id: 'file', label: 'Document', icon: <FileText size={14} /> },
                       { id: 'image', label: 'Image', icon: <ImageIcon size={14} /> },
+                      { id: 'audio', label: 'Audio', icon: <Play size={14} /> },
                       { id: 'location', label: 'Location', icon: <MapPin size={14} /> },
                     ].map(item => (
                       <button
@@ -336,6 +484,8 @@ export default function Messages() {
                             fileInputRef.current?.click()
                           } else if (item.id === 'image') {
                             imageInputRef.current?.click()
+                          } else if (item.id === 'audio') {
+                            audioInputRef.current?.click()
                           } else {
                             setAttachModal(item.id)
                           }
@@ -489,6 +639,59 @@ export default function Messages() {
         onChange={(e) => handleFileChange(e, 'image')} 
         accept="image/*"
       />
+      <input 
+        type="file" 
+        ref={audioInputRef} 
+        style={{ display: 'none' }} 
+        onChange={(e) => handleFileChange(e, 'audio')} 
+        accept="audio/*"
+      />
+
+      {/* ─── LIGHTBOX OVERLAY ─── */}
+      {lightboxImg && (
+        <div 
+          className="modal-overlay" 
+          onClick={() => setLightboxImg(null)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.85)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            cursor: 'zoom-out'
+          }}
+        >
+          <div style={{ position: 'relative', maxWidth: '90%', maxHeight: '90%' }}>
+            <button 
+              onClick={() => setLightboxImg(null)}
+              style={{
+                position: 'absolute',
+                top: -40,
+                right: 0,
+                background: 'none',
+                border: 'none',
+                color: '#fff',
+                cursor: 'pointer'
+              }}
+            >
+              <X size={24} />
+            </button>
+            <img 
+              src={lightboxImg} 
+              alt="Expanded preview" 
+              style={{ maxWidth: '100%', maxHeight: '80vh', objectFit: 'contain', borderRadius: 8 }}
+              onError={(e) => {
+                e.target.src = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=60'
+              }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

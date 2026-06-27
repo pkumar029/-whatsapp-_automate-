@@ -183,6 +183,8 @@ def connect_whatsapp_with_config(db: Session, config: "WhatsAppConnectRequest") 
             payload = {}
             if config.phone:
                 payload["phone"] = config.phone
+            if config.link_method:
+                payload["linkMethod"] = config.link_method
             r = httpx.post("http://localhost:3000/connect", json=payload, timeout=5.0)
             if r.status_code != 200:
                 raise Exception(f"Bridge server returned status code {r.status_code}")

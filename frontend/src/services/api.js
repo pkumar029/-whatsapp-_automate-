@@ -92,6 +92,19 @@ export const healthApi = {
   check: () => api.get('/health', { baseURL: 'http://localhost:8000' }),
 }
 
+// ─── Campaigns & Queue API ─────────────────────────────────────
+export const campaignsApi = {
+  getAll: (params) => api.get('/campaigns', { params }),
+  getById: (id) => api.get(`/campaigns/${id}`),
+  create: (data) => api.post('/campaigns', data),
+  pause: (id) => api.post(`/campaigns/${id}/pause`),
+  resume: (id) => api.post(`/campaigns/${id}/resume`),
+  cancel: (id) => api.post(`/campaigns/${id}/cancel`),
+  getJobs: (id, params) => api.get(`/campaigns/${id}/jobs`, { params }),
+  cancelJob: (campaignId, jobId) => api.post(`/campaigns/${campaignId}/jobs/${jobId}/cancel`),
+  retryJob: (campaignId, jobId) => api.post(`/campaigns/${campaignId}/jobs/${jobId}/retry`),
+}
+
 // ─── Dashboard Summary ────────────────────────────────────────
 export const dashboardApi = {
   getSummary: () => api.get('/dashboard/summary'),
