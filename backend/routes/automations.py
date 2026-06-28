@@ -72,12 +72,29 @@ async def deactivate(automation_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{automation_id}/run")
-async def run_now(automation_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    """Trigger an automation run immediately (runs in background with its own session)."""
+async def run_now(
+    automation_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    dry_run: bool = Query(False, description="Simulate without sending real messages"),
+):
+    """Trigger an automation run immediately. Pass dry_run=true to simulate without sending."""
     automation = automations_service.get_automation_by_id(db, automation_id)
     if not automation:
         raise HTTPException(status_code=404, detail="Automation not found")
     name = automation.name
+
+    if dry_run:
+        # Execute synchronously and return simulation result
+        result = run_automation(db, automation_id, {"trigger": "manual_dry_run"}, dry_run=True)
+        return {
+            "success": True,
+            "dry_run": True,
+            "steps_simulated": result.steps_executed,
+            "log_output": result.log_output,
+            "status": result.status.value if result.status else "unknown",
+            "execution_time_ms": result.execution_time,
+        }
 
     def _bg_run():
         bg_db = SessionLocal()
@@ -91,6 +108,42 @@ async def run_now(automation_id: int, background_tasks: BackgroundTasks, db: Ses
 
     background_tasks.add_task(_bg_run)
     return {"success": True, "message": f"Automation '{name}' triggered"}
+
+
+@router.get("/{automation_id}/history")
+async def get_history(
+    automation_id: int,
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """Return recent run logs for a specific automation."""
+    automation = automations_service.get_automation_by_id(db, automation_id)
+    if not automation:
+        raise HTTPException(status_code=404, detail="Automation not found")
+    from models.models import AutomationLog
+    from sqlalchemy import desc
+    logs = (
+        db.query(AutomationLog)
+        .filter(AutomationLog.automation_id == automation_id)
+        .order_by(desc(AutomationLog.started_at))
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": l.id,
+            "status": l.status.value if l.status else "unknown",
+            "steps_executed": l.steps_executed,
+            "total_steps": l.total_steps,
+            "execution_time": l.execution_time,
+            "started_at": l.started_at,
+            "finished_at": l.finished_at,
+            "error_message": l.error_message,
+            "log_output": l.log_output,
+            "trigger_data": l.trigger_data,
+        }
+        for l in logs
+    ]
 
 
 @router.post("/{automation_id}/duplicate", status_code=201)

@@ -269,7 +269,7 @@ def execute_step(db: Session, step: AutomationStep, context: Dict[str, Any]) -> 
         return context
 
 
-def run_automation(db: Session, automation_id: int, trigger_data: Optional[Dict] = None) -> AutomationLog:
+def run_automation(db: Session, automation_id: int, trigger_data: Optional[Dict] = None, dry_run: bool = False) -> AutomationLog:
     """
     Execute an automation workflow.
     Loads steps in order, executes each, saves log, handles errors.
@@ -283,7 +283,7 @@ def run_automation(db: Session, automation_id: int, trigger_data: Optional[Dict]
     _log_cfg = _ls.get_log_settings(db)
     _log_persisted = _log_cfg["logging_enabled"]
 
-    logger.info(f"Starting automation run: {automation.name} (ID: {automation_id})")
+    logger.info(f"Starting automation {'[DRY RUN] ' if dry_run else ''}run: {automation.name} (ID: {automation_id})")
     start_time = time.time()
 
     log = AutomationLog(
@@ -324,7 +324,31 @@ def run_automation(db: Session, automation_id: int, trigger_data: Optional[Dict]
                 continue
 
             try:
-                context = execute_step(db, step, context)
+                if dry_run:
+                    # Simulate — describe what would happen without side-effects
+                    cfg = step.config or {}
+                    preview = ""
+                    if step.step_type == StepType.send_message:
+                        preview = f"would send: \"{str(cfg.get('message',''))[:60]}\""
+                    elif step.step_type == StepType.send_image:
+                        preview = f"would send image: {cfg.get('image_url','')}"
+                    elif step.step_type == StepType.add_tag:
+                        preview = f"would add tag: {cfg.get('tag','')}"
+                    elif step.step_type == StepType.remove_tag:
+                        preview = f"would remove tag: {cfg.get('tag','')}"
+                    elif step.step_type == StepType.react_message:
+                        preview = f"would react with: {cfg.get('emoji','👍')}"
+                    elif step.step_type == StepType.delay:
+                        preview = f"would wait {cfg.get('seconds',1)}s"
+                    elif step.step_type == StepType.webhook:
+                        preview = f"would POST to: {cfg.get('url','')}"
+                    elif step.step_type == StepType.log:
+                        preview = f"would log: \"{cfg.get('message','')}\""
+                    else:
+                        preview = "would execute"
+                    log_lines.append(f"[DRY RUN] Step {step.step_order}: {step.step_type.value} — {preview}")
+                else:
+                    context = execute_step(db, step, context)
                 steps_executed += 1
                 log_lines.append(f"[OK] Step {step.step_order}: {step.step_type.value}")
             except StepExecutionError as se:

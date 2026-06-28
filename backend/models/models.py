@@ -196,6 +196,7 @@ class Automation(Base):
     is_active = Column(Boolean, default=False)
     run_count = Column(Integer, default=0)
     last_run = Column(DateTime, nullable=True)
+    cooldown_minutes = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

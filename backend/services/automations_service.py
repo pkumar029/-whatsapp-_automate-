@@ -30,6 +30,7 @@ def get_automations(db: Session, page: int = 1, limit: int = 20, search: Optiona
             "is_active": a.is_active,
             "run_count": a.run_count,
             "last_run": a.last_run,
+            "cooldown_minutes": a.cooldown_minutes or 0,
             "step_count": len(a.steps),
             "created_at": a.created_at,
             "updated_at": a.updated_at,
@@ -49,6 +50,7 @@ def create_automation(db: Session, data: AutomationCreate) -> Automation:
         description=data.description,
         trigger_type=TriggerType(data.trigger_type),
         trigger_config=data.trigger_config,
+        cooldown_minutes=data.cooldown_minutes or 0,
     )
     db.add(automation)
     db.flush()

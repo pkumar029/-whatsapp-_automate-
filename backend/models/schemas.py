@@ -128,6 +128,7 @@ class AutomationCreate(BaseModel):
     description: Optional[str] = None
     trigger_type: str = "manual"
     trigger_config: Optional[Dict[str, Any]] = None
+    cooldown_minutes: Optional[int] = 0
     steps: Optional[List[StepSchema]] = None
 
     @field_validator('name')
@@ -143,6 +144,7 @@ class AutomationUpdate(BaseModel):
     description: Optional[str] = None
     trigger_type: Optional[str] = None
     trigger_config: Optional[Dict[str, Any]] = None
+    cooldown_minutes: Optional[int] = None
     steps: Optional[List[StepSchema]] = None
 
 

@@ -154,6 +154,21 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
                         trigger_reason = f"pattern({mode}): {pattern}"
 
             if should_trigger:
+                # Cooldown check — skip if ran within cooldown window
+                cooldown = getattr(automation, "cooldown_minutes", 0) or 0
+                if cooldown > 0:
+                    from datetime import timedelta
+                    from models.models import AutomationLog
+                    cutoff = datetime.utcnow() - timedelta(minutes=cooldown)
+                    recent = db.query(AutomationLog).filter(
+                        AutomationLog.automation_id == automation.id,
+                        AutomationLog.started_at >= cutoff,
+                    ).first()
+                    if recent:
+                        logger.info(f"Automation '{automation.name}' skipped — cooldown {cooldown}min not expired")
+                        should_trigger = False
+
+            if should_trigger:
                 logger.info(f"Triggering automation '{automation.name}' (ID: {automation.id}) via {trigger_reason}")
 
                 # Background runner wrapper to use fresh DB session (avoids request lifecycle closing issues)

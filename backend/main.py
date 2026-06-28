@@ -41,6 +41,8 @@ async def lifespan(app: FastAPI):
          "  value TEXT,"
          "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
          ")"),
+        ("cooldown_minutes column",
+         "ALTER TABLE automations ADD COLUMN cooldown_minutes INT NOT NULL DEFAULT 0"),
         ("trigger_type enum expand",
          "ALTER TABLE automations MODIFY COLUMN trigger_type "
          "ENUM('keyword','keyword_pattern','schedule','contact_added',"
