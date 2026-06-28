@@ -247,17 +247,6 @@ function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
                   onChange={e => set('message', e.target.value)}
                   placeholder="Type your WhatsApp message here..."
                 />
-                {/* Variable quick-insert */}
-                <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Insert:</span>
-                  {['{{name}}', '{{phone}}'].map(v => (
-                    <button key={v} type="button"
-                      onClick={() => set('message', (config.message || '') + v)}
-                      style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border-primary)', background: 'var(--bg-secondary)', color: 'var(--accent-primary)', cursor: 'pointer', fontFamily: 'monospace' }}>
-                      {v}
-                    </button>
-                  ))}
-                </div>
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label" style={{ fontSize: 12 }}>Recipient</label>
