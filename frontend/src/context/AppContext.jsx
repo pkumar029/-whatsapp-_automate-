@@ -75,7 +75,8 @@ export function AppProvider({ children }) {
   const [loadingSession, setLoadingSession] = useState(true)
   const [accountKey, setAccountKey] = useState(0)
   const prevStatusRef = useRef('disconnected')
-  const prevPhoneRef = useRef(null)
+  // Seed from localStorage so account-switch detection survives page refreshes
+  const prevPhoneRef = useRef(localStorage.getItem('wa_active_phone') || null)
 
   const refreshSessionStatus = useCallback(async () => {
     try {
@@ -85,13 +86,20 @@ export function AppProvider({ children }) {
 
       const newPhone = data.phone || null
 
-      // Detect account switch — different phone connected
-      if (prevPhoneRef.current && newPhone && newPhone !== prevPhoneRef.current) {
+      // Detect account switch — different phone connected (works across page reloads)
+      if (newPhone && prevPhoneRef.current && newPhone !== prevPhoneRef.current) {
         localStorage.removeItem('wa_last_sync')
         localStorage.removeItem('wa_session_start')
         setAccountKey(k => k + 1)
       }
-      if (newPhone) prevPhoneRef.current = newPhone
+      if (newPhone) {
+        prevPhoneRef.current = newPhone
+        localStorage.setItem('wa_active_phone', newPhone)
+      } else if (!newPhone && prevPhoneRef.current) {
+        // Disconnected — clear stored phone so next connect is treated as fresh
+        localStorage.removeItem('wa_active_phone')
+        prevPhoneRef.current = null
+      }
 
       // Auto-sync contacts when WhatsApp first becomes connected (fire-and-forget so navigation isn't blocked)
       if (data.status === 'connected' && prevStatusRef.current !== 'connected') {
