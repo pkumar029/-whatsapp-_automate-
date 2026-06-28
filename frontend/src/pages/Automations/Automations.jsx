@@ -236,10 +236,28 @@ function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
           {step.step_type === 'send_message' && (
             <>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: 12 }}>Message *</label>
-                <textarea className="form-input form-textarea" style={{ minHeight: 60, fontSize: 12, padding: 8 }}
-                  value={config.message || ''} onChange={e => set('message', e.target.value)}
-                  placeholder="Type your message... use {{name}} for contact name" />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <label className="form-label" style={{ fontSize: 12, marginBottom: 0 }}>Message *</label>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{(config.message || '').length} chars</span>
+                </div>
+                <textarea
+                  className="form-input"
+                  style={{ minHeight: 100, fontSize: 14, padding: '10px 12px', lineHeight: 1.5, fontFamily: 'inherit', resize: 'vertical' }}
+                  value={config.message || ''}
+                  onChange={e => set('message', e.target.value)}
+                  placeholder="Type your WhatsApp message here..."
+                />
+                {/* Variable quick-insert */}
+                <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Insert:</span>
+                  {['{{name}}', '{{phone}}'].map(v => (
+                    <button key={v} type="button"
+                      onClick={() => set('message', (config.message || '') + v)}
+                      style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border-primary)', background: 'var(--bg-secondary)', color: 'var(--accent-primary)', cursor: 'pointer', fontFamily: 'monospace' }}>
+                      {v}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label" style={{ fontSize: 12 }}>Recipient</label>
