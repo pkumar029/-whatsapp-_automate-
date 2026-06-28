@@ -23,12 +23,7 @@ def get_messages(
     wa_account: Optional[str] = None,
 ) -> dict:
     query = db.query(Message)
-
-    if wa_account:
-        # Include contacts belonging to this account OR with no account set (manually added)
-        query = query.join(Contact).filter(
-            or_(Contact.wa_account == wa_account, Contact.wa_account.is_(None))
-        )
+    # wa_account kept for compatibility — messages are shared across all accounts
 
     if search:
         s = f"%{search}%"
@@ -102,18 +97,8 @@ def send_message(db: Session, data: MessageSend) -> Message:
 
 
 def get_sent_count(db: Session, wa_account: Optional[str] = None) -> int:
-    query = db.query(func.count(Message.id)).filter(Message.status == MessageStatus.sent)
-    if wa_account:
-        query = query.join(Contact).filter(
-            or_(Contact.wa_account == wa_account, Contact.wa_account.is_(None))
-        )
-    return query.scalar() or 0
+    return db.query(func.count(Message.id)).filter(Message.status == MessageStatus.sent).scalar() or 0
 
 
 def get_failed_count(db: Session, wa_account: Optional[str] = None) -> int:
-    query = db.query(func.count(Message.id)).filter(Message.status == MessageStatus.failed)
-    if wa_account:
-        query = query.join(Contact).filter(
-            or_(Contact.wa_account == wa_account, Contact.wa_account.is_(None))
-        )
-    return query.scalar() or 0
+    return db.query(func.count(Message.id)).filter(Message.status == MessageStatus.failed).scalar() or 0
