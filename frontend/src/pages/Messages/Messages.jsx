@@ -9,7 +9,7 @@ import {
   Timer, EyeOff, Link2, Download, Pin, Archive,
   Plus, Pencil, UserPlus, UserMinus, Crown, LogOut, Hash
 } from 'lucide-react'
-import { messagesApi, contactsApi, whatsappApi, groupsApi } from '../../services/api'
+import { messagesApi, contactsApi, whatsappApi, groupsApi, BASE_URL } from '../../services/api'
 import { Link } from 'react-router-dom'
 import { formatISTTime } from '../../utils/date'
 import { getErrorMessage } from '../../utils/error'
@@ -1048,6 +1048,38 @@ export default function Messages() {
   }, [sessionStatus.status])
   useEffect(() => { if (selectedContact) fetchProfilePic(selectedContact.id) }, [selectedContact])
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+
+  // ── Real-time SSE: show incoming WhatsApp messages instantly ───
+  useEffect(() => {
+    if (sessionStatus.status !== 'connected') return
+    const es = new EventSource(`${BASE_URL}/messages/stream`)
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data)
+        if (data.type !== 'new_message') return
+        const cid = data.contact_id
+        // Update last message preview in chat list
+        setLastMessages(prev => ({
+          ...prev,
+          [cid]: { content: data.content, time: new Date().toISOString(), direction: 'inbound' }
+        }))
+        if (selectedContact?.id === cid) {
+          // Active chat — fetch messages immediately so bubble appears
+          fetchMessages()
+        } else {
+          // Other chat — mark unread + desktop notification
+          setUnreadContacts(prev => new Set([...prev, cid]))
+          const contact = contactsMapRef.current[cid]
+          notify(contact?.name || data.name || data.phone || 'WhatsApp', (data.content || '').slice(0, 80), {
+            tag: `wa-msg-${cid}`,
+            onClick: () => { if (contact) selectContact(contact) }
+          })
+        }
+      } catch {}
+    }
+    es.onerror = () => {}  // browser auto-reconnects on error
+    return () => es.close()
+  }, [sessionStatus.status, selectedContact?.id, fetchMessages, notify])
 
   // ── Send message (with reply prefix) ──────────────────────────
   const handleSend = async (textToSend, mediaInfo = null, targetContact = null) => {

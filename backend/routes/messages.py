@@ -1,7 +1,10 @@
 """
-Messages Routes — Send, list, filter messages
+Messages Routes — Send, list, filter messages, SSE stream
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+import asyncio
+import json
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from typing import Optional
 from sqlalchemy.orm import Session
 from database.connection import get_db
@@ -9,6 +12,50 @@ from services import messages_service
 from models.schemas import MessageSend, MessageListResponse
 
 router = APIRouter(prefix="/messages", tags=["Messages"])
+
+# ─── SSE broadcaster ────────────────────────────────────────────
+_sse_queues: list[asyncio.Queue] = []
+
+def broadcast_message_event(data: dict) -> None:
+    """Push a new-message event to all connected SSE clients."""
+    payload = json.dumps(data)
+    for q in _sse_queues[:]:
+        try:
+            q.put_nowait(payload)
+        except asyncio.QueueFull:
+            pass
+
+@router.get("/stream")
+async def message_stream(request: Request):
+    """Server-Sent Events endpoint — pushes new inbound messages in real-time."""
+    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+    _sse_queues.append(queue)
+
+    async def generator():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=20)
+                    yield f"data: {data}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"   # keep connection alive
+        finally:
+            try:
+                _sse_queues.remove(queue)
+            except ValueError:
+                pass
+
+    return StreamingResponse(
+        generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @router.get("", response_model=MessageListResponse)

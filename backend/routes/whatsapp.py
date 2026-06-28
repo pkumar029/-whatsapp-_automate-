@@ -113,6 +113,21 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
         
         logger.info(f"Webhook received and saved message from {phone} ({contact.name})")
 
+        # Push real-time event to all SSE subscribers
+        try:
+            from routes.messages import broadcast_message_event
+            broadcast_message_event({
+                "type": "new_message",
+                "id": msg.id,
+                "contact_id": contact.id,
+                "phone": phone,
+                "name": contact.name,
+                "content": content,
+                "direction": "inbound",
+            })
+        except Exception:
+            pass
+
         # 3. Trigger matching active automations in background
         from models.models import Automation, TriggerType
         from services.automation_runner import run_automation
