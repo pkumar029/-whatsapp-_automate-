@@ -15,9 +15,13 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 @router.get("/summary", response_model=DashboardSummary)
 async def get_summary(db: Session = Depends(get_db)):
     """Get dashboard summary statistics."""
-    total_contacts = contacts_service.get_total_contacts(db)
-    sent_messages = messages_service.get_sent_count(db)
-    failed_messages = messages_service.get_failed_count(db)
+    from models.models import WhatsappSession, SessionStatus
+    session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
+    wa_account = session.phone if session else None
+
+    total_contacts = contacts_service.get_total_contacts(db, wa_account)
+    sent_messages = messages_service.get_sent_count(db, wa_account)
+    failed_messages = messages_service.get_failed_count(db, wa_account)
     active_automations = automations_service.get_active_automations_count(db)
     
     # Active campaigns and queued message jobs

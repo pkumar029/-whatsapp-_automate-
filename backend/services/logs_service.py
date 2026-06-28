@@ -24,6 +24,12 @@ def get_logs(
         query = query.filter(AutomationLog.status == status)
     if automation_id:
         query = query.filter(AutomationLog.automation_id == automation_id)
+    if search:
+        # Filter by automation name via subquery
+        matching_ids = [
+            a.id for a in db.query(Automation).filter(Automation.name.ilike(f"%{search}%")).all()
+        ]
+        query = query.filter(AutomationLog.automation_id.in_(matching_ids))
 
     total = query.count()
     logs = query.order_by(AutomationLog.started_at.desc()).offset((page - 1) * limit).limit(limit).all()

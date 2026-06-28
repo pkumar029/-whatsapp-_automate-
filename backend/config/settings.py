@@ -12,8 +12,9 @@ class Settings(BaseSettings):
     APP_DEBUG: bool = True
     APP_PORT: int = 8000
 
-    # Frontend
+    # Frontend (comma-separated for multiple origins, or * for all)
     FRONTEND_URL: str = "http://localhost:5173"
+    CORS_ORIGINS: str = "*"
 
     # Database
     DB_HOST: str = "localhost"

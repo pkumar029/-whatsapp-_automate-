@@ -137,7 +137,7 @@ function FlowArrow({ onInsert }) {
 }
 
 // ─── Step Node Card Component ────────────────────────────────
-function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMoveDown }) {
+function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMoveDown, triggerType }) {
   const [expanded, setExpanded] = useState(false)
   
   let config = {}
@@ -284,23 +284,127 @@ function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
                   style={{ minHeight: 60, fontSize: 12, padding: 8 }}
                   value={config.message || ''} 
                   onChange={e => updateConfigField('message', e.target.value)}
-                  placeholder="e.g. Hello {{name}}! Welcome to our service."
+                  placeholder="Type your message here..."
                 />
                 <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2, display: 'block' }}>
-                  Use `{{name}}` or `{{phone}}` to insert contact details dynamically.
+                  Write a standard text message. You can optionally use {"{{name}}"} to dynamically insert contact names.
                 </span>
               </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: 11 }}>Recipient Phone (Optional)</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  style={{ padding: '6px 10px', fontSize: 12, height: 32 }}
-                  value={config.phone || ''} 
-                  onChange={e => updateConfigField('phone', e.target.value)}
-                  placeholder="Leave empty to use active contact's phone"
-                />
-              </div>
+
+              {(() => {
+                const recipientMode = config.target_type === 'group' 
+                  ? 'group' 
+                  : ((config.phone && config.phone !== '') ? 'custom' : 'active');
+                
+                const isScheduledOrManual = triggerType === 'schedule' || triggerType === 'manual';
+                const activeMode = isScheduledOrManual ? 'custom' : (recipientMode === 'active' && config.target_type === 'group' ? 'group' : recipientMode);
+
+                return (
+                  <>
+                    <div className="form-group" style={{ marginBottom: 10 }}>
+                      <label className="form-label" style={{ fontSize: 11 }}>Recipient Type *</label>
+                      <select 
+                        className="form-input" 
+                        style={{ padding: '4px 8px', fontSize: 12, height: 32 }}
+                        value={activeMode}
+                        onChange={e => {
+                          const nextMode = e.target.value;
+                          if (nextMode === 'group') {
+                            onUpdate({
+                              ...step,
+                              config: {
+                                ...config,
+                                target_type: 'group',
+                                target_tag: config.target_tag || 'all',
+                                stagger_seconds: config.stagger_seconds || 5,
+                                phone: ''
+                              }
+                            });
+                          } else if (nextMode === 'custom') {
+                            onUpdate({
+                              ...step,
+                              config: {
+                                ...config,
+                                target_type: 'single',
+                                phone: (config.phone && config.phone !== '') ? config.phone : '+91xxxxxxxx'
+                              }
+                            });
+                          } else {
+                            onUpdate({
+                              ...step,
+                              config: {
+                                ...config,
+                                target_type: 'single',
+                                phone: ''
+                              }
+                            });
+                          }
+                        }}
+                      >
+                        {!isScheduledOrManual && (
+                          <option value="active">Active Contact (Dynamic Response)</option>
+                        )}
+                        <option value="custom">Enter Custom Number (Static)</option>
+                        <option value="group">Loop Group / Tag (Bulk Broadcast)</option>
+                      </select>
+                    </div>
+
+                    {activeMode === 'group' && (
+                      <div style={{ display: 'flex', gap: 10, marginBottom: 0 }}>
+                        <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                          <label className="form-label" style={{ fontSize: 11 }}>Target Group / Tag *</label>
+                          <select
+                            className="form-input"
+                            style={{ padding: '4px 8px', fontSize: 12, height: 32 }}
+                            value={config.target_tag || 'all'}
+                            onChange={e => updateConfigField('target_tag', e.target.value)}
+                          >
+                            <option value="all">All Contacts</option>
+                            <option value="whatsapp_groups">All WhatsApp Groups</option>
+                            <option value="leads">leads</option>
+                            <option value="customers">customers</option>
+                            <option value="vip">vip</option>
+                          </select>
+                        </div>
+                        <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                          <label className="form-label" style={{ fontSize: 11 }}>Stagger Delay (s) *</label>
+                          <input
+                            type="number"
+                            className="form-input"
+                            style={{ padding: '6px 10px', fontSize: 12, height: 32 }}
+                            min="0"
+                            value={config.stagger_seconds || 5}
+                            onChange={e => updateConfigField('stagger_seconds', parseInt(e.target.value, 10) || 0)}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {activeMode === 'custom' && (
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label" style={{ fontSize: 11 }}>Recipient Phone *</label>
+                        <input 
+                          type="text" 
+                          className="form-input" 
+                          style={{ padding: '6px 10px', fontSize: 12, height: 32 }}
+                          value={config.phone || ''} 
+                          onChange={e => updateConfigField('phone', e.target.value)}
+                          placeholder="+91xxxxxxxx"
+                        />
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                          ⚠️ Enter a static recipient phone number with country code (e.g. +91xxxxxxxx).
+                        </span>
+                      </div>
+                    )}
+
+                    {activeMode === 'active' && (
+                      <div style={{ padding: '10px 12px', background: 'rgba(255,255,255,0.02)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-primary)', fontSize: 11, color: 'var(--text-muted)' }}>
+                        ℹ️ This step will automatically respond to whichever contact sends the triggering WhatsApp message.
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           )}
 
@@ -438,6 +542,35 @@ function EndNode() {
   )
 }
 
+// Helper to parse cron string for builder
+const parseCron = (cronStr) => {
+  if (!cronStr) return { type: 'minutes', value: 5, time: '12:00' }
+  const parts = cronStr.trim().split(/\s+/)
+  
+  if (parts.length === 6 && parts[0].startsWith('*/')) {
+    const val = parseInt(parts[0].replace('*/', ''), 10)
+    return { type: 'seconds', value: isNaN(val) ? 10 : val, time: '12:00' }
+  }
+  
+  if (parts.length === 5 && parts[0].startsWith('*/')) {
+    const val = parseInt(parts[0].replace('*/', ''), 10)
+    return { type: 'minutes', value: isNaN(val) ? 5 : val, time: '12:00' }
+  }
+  
+  if (parts.length === 5 && parts[0] === '0' && parts[1].startsWith('*/')) {
+    const val = parseInt(parts[1].replace('*/', ''), 10)
+    return { type: 'hours', value: isNaN(val) ? 1 : val, time: '12:00' }
+  }
+  
+  if (parts.length === 5 && !parts[0].includes('*') && !parts[1].includes('*') && parts[2] === '*' && parts[3] === '*' && parts[4] === '*') {
+    const min = parts[0].padStart(2, '0')
+    const hr = parts[1].padStart(2, '0')
+    return { type: 'daily', value: 1, time: `${hr}:${min}` }
+  }
+  
+  return { type: 'custom', value: 5, time: '12:00' }
+}
+
 // ─── Automation Modal ─────────────────────────────────────────
 function AutomationModal({ automation, onClose, onSave }) {
   const [form, setForm] = useState({
@@ -451,6 +584,10 @@ function AutomationModal({ automation, onClose, onSave }) {
   const [triggerCron, setTriggerCron] = useState(
     automation?.trigger_type === 'schedule' ? automation.trigger_config?.cron || '' : ''
   )
+  const [scheduleBuilder, setScheduleBuilder] = useState(() => {
+    const initialCron = automation?.trigger_type === 'schedule' ? automation.trigger_config?.cron || '' : ''
+    return parseCron(initialCron)
+  })
   const [steps, setSteps] = useState([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -463,7 +600,9 @@ function AutomationModal({ automation, onClose, onSave }) {
         trigger_type: automation.trigger_type || 'manual',
       })
       setTriggerKeyword(automation.trigger_type === 'keyword' ? automation.trigger_config?.keyword || '' : '')
-      setTriggerCron(automation.trigger_type === 'schedule' ? automation.trigger_config?.cron || '' : '')
+      const initialCron = automation.trigger_type === 'schedule' ? automation.trigger_config?.cron || '' : ''
+      setTriggerCron(initialCron)
+      setScheduleBuilder(parseCron(initialCron))
     }
     if (automation?.id) {
       automationsApi.getSteps(automation.id)
@@ -477,6 +616,26 @@ function AutomationModal({ automation, onClose, onSave }) {
       setSteps([])
     }
   }, [automation])
+
+  useEffect(() => {
+    if (form.trigger_type === 'schedule') {
+      const { type, value, time } = scheduleBuilder
+      if (type === 'custom') return
+      
+      if (type === 'seconds') {
+        setTriggerCron(`*/${value} * * * * *`)
+      } else if (type === 'minutes') {
+        setTriggerCron(`*/${value} * * * *`)
+      } else if (type === 'hours') {
+        setTriggerCron(`0 */${value} * * *`)
+      } else if (type === 'daily') {
+        const [hr, min] = time.split(':')
+        const h = parseInt(hr, 10) || 0
+        const m = parseInt(min, 10) || 0
+        setTriggerCron(`${m} ${h} * * *`)
+      }
+    }
+  }, [scheduleBuilder, form.trigger_type])
 
   const addStep = () => {
     setSteps([...steps, { step_type: 'send_message', step_order: steps.length + 1, config: {} }])
@@ -590,18 +749,94 @@ function AutomationModal({ automation, onClose, onSave }) {
             </div>
           )}
           {form.trigger_type === 'schedule' && (
-            <div className="form-group">
-              <label className="form-label">Cron Schedule Expression *</label>
-              <input 
-                type="text" 
-                className="form-input" 
-                placeholder="e.g. */5 * * * * (every 5 minutes)" 
-                value={triggerCron} 
-                onChange={e => setTriggerCron(e.target.value)} 
-              />
-              <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>
-                Standard crontab format: minute, hour, day-of-month, month, day-of-week.
-              </span>
+            <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label className="form-label">Schedule Trigger Builder</label>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 6 }}>
+                  {[
+                    { id: 'seconds', label: 'Seconds' },
+                    { id: 'minutes', label: 'Minutes' },
+                    { id: 'hours', label: 'Hours' },
+                    { id: 'daily', label: 'Daily Time' },
+                    { id: 'custom', label: 'Custom Cron' },
+                  ].map(opt => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setScheduleBuilder(prev => ({ ...prev, type: opt.id }))}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: 'var(--radius-md)',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        border: '1px solid var(--border-primary)',
+                        cursor: 'pointer',
+                        background: scheduleBuilder.type === opt.id ? 'var(--accent-primary-muted)' : 'rgba(255,255,255,0.02)',
+                        color: scheduleBuilder.type === opt.id ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {scheduleBuilder.type !== 'custom' && scheduleBuilder.type !== 'daily' && (
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontSize: 11 }}>Run Every (Value) *</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    min="1"
+                    style={{ padding: '6px 10px', fontSize: 12, height: 32 }}
+                    value={scheduleBuilder.value}
+                    onChange={e => {
+                      const val = Math.max(1, parseInt(e.target.value, 10) || 1)
+                      setScheduleBuilder(prev => ({ ...prev, value: val }))
+                    }}
+                  />
+                  <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                    Runs the workflow automatically every {scheduleBuilder.value} {scheduleBuilder.type}.
+                  </span>
+                </div>
+              )}
+
+              {scheduleBuilder.type === 'daily' && (
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontSize: 11 }}>Daily Run Time *</label>
+                  <input
+                    type="time"
+                    className="form-input"
+                    style={{ padding: '6px 10px', fontSize: 12, height: 32 }}
+                    value={scheduleBuilder.time}
+                    onChange={e => {
+                      const val = e.target.value || '12:00'
+                      setScheduleBuilder(prev => ({ ...prev, time: val }))
+                    }}
+                  />
+                  <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                    Runs the workflow automatically every day at {scheduleBuilder.time}.
+                  </span>
+                </div>
+              )}
+
+              {scheduleBuilder.type === 'custom' && (
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontSize: 11 }}>Cron Expression *</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    placeholder="e.g. */5 * * * * (every 5 minutes)" 
+                    value={triggerCron} 
+                    onChange={e => setTriggerCron(e.target.value)} 
+                    style={{ padding: '6px 10px', fontSize: 12, height: 32 }}
+                  />
+                  <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                    Standard crontab format: minute, hour, day-of-month, month, day-of-week.
+                  </span>
+                </div>
+              )}
             </div>
           )}
           {form.trigger_type === 'contact_added' && (
@@ -641,6 +876,7 @@ function AutomationModal({ automation, onClose, onSave }) {
                     step={step}
                     index={i}
                     totalSteps={steps.length}
+                    triggerType={form.trigger_type}
                     onUpdate={updated => setSteps(steps.map((s, idx) => idx === i ? updated : s))}
                     onDelete={() => setSteps(steps.filter((_, idx) => idx !== i))}
                     onMoveUp={() => {

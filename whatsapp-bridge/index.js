@@ -42,9 +42,11 @@ let qrCodeBase64 = null;
 let connectedPhone = null;
 let pairingCode = null;
 let lastError = null;
+let currentLinkMethod = 'qr';
 
 // Initialize WhatsApp client
 async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
+    currentLinkMethod = linkMethod;
     const expectedPhone = phoneForPairingCode ? phoneForPairingCode.replace(/\D/g, '') : null;
 
     if (client) {
@@ -118,7 +120,11 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
         const actualPhone = (client.info && client.info.wid) ? client.info.wid.user : (client.info ? client.info.phone : expectedPhone);
         
         // Security Verification: Ensure actual connected phone number matches expected phone number
-        if (expectedPhone && actualPhone) {
+        const shouldVerify = expectedPhone && 
+                             actualPhone && 
+                             currentLinkMethod !== 'qr' && 
+                             expectedPhone.length >= 8;
+        if (shouldVerify) {
             const cleanActual = actualPhone.replace(/\D/g, '');
             const isMatch = cleanActual === expectedPhone || 
                             cleanActual.endsWith(expectedPhone) || 
@@ -280,9 +286,18 @@ app.post('/send', async (req, res) => {
         if (phone.includes('@')) {
             cleanPhone = phone;
         } else {
-            cleanPhone = phone.replace(/[+\s-()]/g, '');
-            if (!cleanPhone.endsWith('@c.us')) {
-                cleanPhone = `${cleanPhone}@c.us`;
+            const formatted = phone.replace(/[+\s-()]/g, '');
+            try {
+                const numberId = await client.getNumberId(formatted);
+                if (numberId && !numberId._serialized.includes('@lid')) {
+                    cleanPhone = numberId._serialized;
+                    console.log(`Resolved number ${formatted} to JID: ${cleanPhone}`);
+                } else {
+                    cleanPhone = `${formatted}@c.us`;
+                }
+            } catch (resolveErr) {
+                console.error('Failed to resolve number JID:', resolveErr);
+                cleanPhone = `${formatted}@c.us`;
             }
         }
 
@@ -324,16 +339,24 @@ app.get('/contacts', async (req, res) => {
             }
         }
 
-        // 2. Merge active chats to capture groups/broadcasts not in contacts list
+        // 2. Merge active chats — mark them so we know they have real conversations
         for (const chat of chats) {
-            if (chat.id && chat.id._serialized && !contactMap.has(chat.id._serialized)) {
-                contactMap.set(chat.id._serialized, {
-                    id: chat.id,
-                    name: chat.name,
-                    isGroup: chat.isGroup,
-                    isUser: chat.id.server === 'c.us',
-                    number: chat.id.user
-                });
+            if (chat.id && chat.id._serialized) {
+                if (!contactMap.has(chat.id._serialized)) {
+                    contactMap.set(chat.id._serialized, {
+                        id: chat.id,
+                        name: chat.name,
+                        isGroup: chat.isGroup,
+                        isUser: chat.id.server === 'c.us',
+                        number: chat.id.user,
+                        fromActiveChat: true   // came from an actual conversation
+                    });
+                } else {
+                    // Tag the existing contact entry as active chat too
+                    const existing = contactMap.get(chat.id._serialized);
+                    existing.fromActiveChat = true;
+                    contactMap.set(chat.id._serialized, existing);
+                }
             }
         }
 
@@ -344,7 +367,9 @@ app.get('/contacts', async (req, res) => {
                 const jid = c.id._serialized;
                 const isGroup = c.isGroup || jid.endsWith('@g.us');
                 const isBroadcast = jid.endsWith('@broadcast') || (c.id && c.id.server === 'broadcast');
-                if (isGroup || isBroadcast) return true;
+                if (isBroadcast) return false;
+                if (isGroup) return true;
+                // Only include contacts actually saved in the phone's address book
                 return c.isMyContact === true;
             })
             .map(c => {
@@ -362,14 +387,12 @@ app.get('/contacts', async (req, res) => {
                     phone = num ? '+' + num : jid;
                 }
 
-                let name = c.name || c.pushname;
+                let name = c.name || (type !== 'User' ? c.pushname : null);
                 if (!name) {
-                    if (type === 'User') {
-                        name = c.number || (c.id && c.id.user);
-                    } else if (type === 'Group') {
+                    if (type === 'Group') {
                         name = 'Unnamed Group (' + jid.split('@')[0] + ')';
                     } else {
-                        name = 'Unnamed Broadcast List';
+                        name = null; // will be filtered out below
                     }
                 }
 
@@ -390,6 +413,269 @@ app.get('/contacts', async (req, res) => {
         console.error('Failed to fetch contacts:', err);
         res.status(500).json({ success: false, error: err.message });
     }
+});
+
+// GET /chats — returns real WhatsApp chat list with last message + unread count
+app.get('/chats', async (req, res) => {
+    if (clientStatus !== 'connected' || !client) {
+        return res.status(400).json({ success: false, error: 'WhatsApp client is not connected' });
+    }
+    try {
+        console.log('Fetching WhatsApp chat list...');
+        const chats = await client.getChats();
+        const result = chats.slice(0, 150).map(chat => {
+            const isGroup = chat.isGroup;
+            const phone = isGroup ? chat.id._serialized : ('+' + chat.id.user);
+            const lm = chat.lastMessage;
+            let lastMsgType = 'chat';
+            let lastMsgAuthor = null;
+            if (lm) {
+                lastMsgType = lm.type || 'chat';
+                if (isGroup) {
+                    if (lm.fromMe) {
+                        lastMsgAuthor = 'You';
+                    } else if (lm.author) {
+                        lastMsgAuthor = lm.author.split('@')[0];
+                    }
+                }
+            }
+            return {
+                id: chat.id._serialized,
+                name: chat.name || phone,
+                phone,
+                isGroup,
+                type: isGroup ? 'Group' : 'User',
+                lastMessage: lm?.body || '',
+                lastMessageTime: lm?.timestamp ? lm.timestamp * 1000 : null,
+                lastMessageFromMe: lm?.fromMe || false,
+                lastMessageType: lastMsgType,
+                lastMessageAuthor: lastMsgAuthor,
+                unreadCount: chat.unreadCount || 0,
+                pinned: chat.pinned || false,
+                archived: chat.archived || false,
+                participantCount: isGroup ? (chat.participants?.length || 0) : 0
+            };
+        });
+        res.json({ success: true, chats: result });
+    } catch (e) {
+        console.error('Failed to fetch chats:', e);
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// GET /group-members?groupId=... — returns participants of a WhatsApp group
+app.get('/group-members', async (req, res) => {
+    if (clientStatus !== 'connected' || !client) {
+        return res.status(400).json({ success: false, error: 'WhatsApp client is not connected' });
+    }
+    const { groupId } = req.query;
+    if (!groupId) return res.status(400).json({ success: false, error: 'groupId required' });
+    try {
+        const chat = await client.getChatById(groupId);
+        if (!chat.isGroup) return res.status(400).json({ success: false, error: 'Not a group chat' });
+        const members = (chat.participants || []).map(p => ({
+            id: p.id._serialized,
+            phone: '+' + p.id.user,
+            isAdmin: p.isAdmin || false,
+            isSuperAdmin: p.isSuperAdmin || false
+        }));
+        res.json({ success: true, groupId, name: chat.name, memberCount: members.length, members });
+    } catch (e) {
+        console.error('Failed to fetch group members:', e);
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ─── Phase 12: Group Management ──────────────────────────────────
+
+app.post('/group/create', async (req, res) => {
+    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    const { name, participants } = req.body;
+    if (!name || !participants?.length) return res.status(400).json({ success: false, error: 'name and participants required' });
+    try {
+        const ids = participants.map(p => p.replace(/[+\s\-()]/g, '') + '@c.us');
+        const result = await client.createGroup(name, ids);
+        res.json({ success: true, groupId: result.gid._serialized, name });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/group/add-members', async (req, res) => {
+    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    const { groupId, participants } = req.body;
+    try {
+        const chat = await client.getChatById(groupId);
+        const ids = participants.map(p => p.replace(/[+\s\-()]/g, '') + '@c.us');
+        await chat.addParticipants(ids);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/group/remove-member', async (req, res) => {
+    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    const { groupId, participantId } = req.body;
+    try {
+        const chat = await client.getChatById(groupId);
+        await chat.removeParticipants([participantId]);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/group/promote', async (req, res) => {
+    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    const { groupId, participantId } = req.body;
+    try {
+        const chat = await client.getChatById(groupId);
+        await chat.promoteParticipants([participantId]);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/group/demote', async (req, res) => {
+    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    const { groupId, participantId } = req.body;
+    try {
+        const chat = await client.getChatById(groupId);
+        await chat.demoteParticipants([participantId]);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/group/rename', async (req, res) => {
+    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    const { groupId, name } = req.body;
+    try {
+        const chat = await client.getChatById(groupId);
+        await chat.setSubject(name);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/group/set-description', async (req, res) => {
+    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    const { groupId, description } = req.body;
+    try {
+        const chat = await client.getChatById(groupId);
+        await chat.setDescription(description);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.get('/group/invite-link', async (req, res) => {
+    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    const { groupId } = req.query;
+    try {
+        const chat = await client.getChatById(groupId);
+        const code = await chat.getInviteCode();
+        res.json({ success: true, link: `https://chat.whatsapp.com/${code}` });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/group/leave', async (req, res) => {
+    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    const { groupId } = req.body;
+    try {
+        const chat = await client.getChatById(groupId);
+        await chat.leave();
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ─── Phase 13: Status ──────────────────────────────────────────────
+
+app.get('/status/list', async (req, res) => {
+    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    try {
+        const contacts = await client.getContacts();
+        const myContacts = contacts.filter(c => c.isMyContact && c.id && c.id.server === 'c.us').slice(0, 40);
+        const statuses = [];
+        for (const contact of myContacts) {
+            try {
+                const about = await contact.getAbout();
+                statuses.push({
+                    id: contact.id._serialized,
+                    name: contact.name || contact.pushname || ('+' + contact.number),
+                    phone: '+' + contact.number,
+                    about: about || null,
+                });
+            } catch {
+                statuses.push({
+                    id: contact.id._serialized,
+                    name: contact.name || contact.pushname || ('+' + contact.number),
+                    phone: '+' + contact.number,
+                    about: null,
+                });
+            }
+        }
+        res.json({ success: true, statuses });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/status/post', async (req, res) => {
+    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ success: false, error: 'text required' });
+    try {
+        await client.sendMessage('status@broadcast', text);
+        res.json({ success: true, message: 'Status posted' });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// GET /profile-pic?phone=+91xxxxx — returns WhatsApp profile picture URL
+app.get('/profile-pic', async (req, res) => {
+    const { phone } = req.query;
+    if (!phone || clientStatus !== 'connected' || !client) {
+        return res.json({ success: false, url: null });
+    }
+    try {
+        let jid;
+        if (phone.includes('@')) {
+            jid = phone;
+        } else {
+            const clean = phone.replace(/[+\s\-()]/g, '');
+            jid = `${clean}@c.us`;
+        }
+        const url = await client.getProfilePicUrl(jid);
+        res.json({ success: true, url: url || null });
+    } catch (e) {
+        // Contact has no profile pic or privacy settings block it
+        res.json({ success: false, url: null });
+    }
+});
+
+// GET /recent-messages — returns recent inbound messages across all chats
+app.get('/recent-messages', async (req, res) => {
+    if (clientStatus !== 'connected' || !client) {
+        return res.json({ success: false, messages: [] });
+    }
+    try {
+        const chats = await client.getChats();
+        const recent = [];
+        // Collect last message from each chat
+        for (const chat of chats.slice(0, 30)) {
+            const msgs = await chat.fetchMessages({ limit: 1 });
+            if (msgs.length > 0) {
+                const m = msgs[0];
+                if (!m.fromMe) {
+                    const num = chat.id.user;
+                    const phone = chat.isGroup ? chat.id._serialized : '+' + num;
+                    recent.push({
+                        id: m.id.id,
+                        phone,
+                        name: chat.name || phone,
+                        body: m.body,
+                        timestamp: m.timestamp * 1000
+                    });
+                }
+            }
+        }
+        res.json({ success: true, messages: recent });
+    } catch (e) {
+        res.json({ success: false, messages: [] });
+    }
+});
+
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', bridge: 'running', whatsapp: clientStatus, port: PORT });
 });
 
 app.listen(PORT, () => {

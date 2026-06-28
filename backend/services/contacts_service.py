@@ -16,10 +16,19 @@ def get_contacts(
     page: int = 1,
     limit: int = 20,
     search: Optional[str] = None,
-    is_active: Optional[bool] = None
+    is_active: Optional[bool] = None,
+    wa_account: Optional[str] = None,
 ) -> dict:
-    """List contacts with pagination and search."""
+    """List contacts with pagination and search.
+
+    If wa_account is provided, returns only contacts that belong to that
+    WhatsApp account (synced from it) plus manually added contacts (wa_account IS NULL).
+    """
     query = db.query(Contact)
+
+    if wa_account:
+        # Strict isolation: only contacts belonging to this WhatsApp account
+        query = query.filter(Contact.wa_account == wa_account)
 
     if search:
         search_term = f"%{search}%"
@@ -53,10 +62,19 @@ def get_contact_by_phone(db: Session, phone: str) -> Optional[Contact]:
     return db.query(Contact).filter(Contact.phone == phone).first()
 
 
-def create_contact(db: Session, data: ContactCreate) -> Contact:
+def create_contact(db: Session, data: ContactCreate, wa_account: Optional[str] = None) -> Contact:
     existing = get_contact_by_phone(db, data.phone)
     if existing:
         raise ValueError(f"Contact with phone {data.phone} already exists")
+
+    # Use wa_account from data if provided, otherwise from parameter, otherwise from active session
+    resolved_wa_account = data.wa_account or wa_account
+    if not resolved_wa_account:
+        from models.models import WhatsappSession, SessionStatus
+        session = db.query(WhatsappSession).filter(
+            WhatsappSession.status == SessionStatus.connected
+        ).first()
+        resolved_wa_account = session.phone if session else None
 
     contact = Contact(
         name=data.name,
@@ -64,11 +82,12 @@ def create_contact(db: Session, data: ContactCreate) -> Contact:
         email=data.email,
         notes=data.notes,
         tags=data.tags,
+        wa_account=resolved_wa_account,
     )
     db.add(contact)
     db.commit()
     db.refresh(contact)
-    logger.info(f"Created contact: {contact.name} ({contact.phone})")
+    logger.info(f"Created contact: {contact.name} ({contact.phone}) for account {resolved_wa_account}")
     return contact
 
 
@@ -97,8 +116,11 @@ def delete_contact(db: Session, contact_id: int) -> bool:
     return True
 
 
-def get_total_contacts(db: Session) -> int:
-    return db.query(func.count(Contact.id)).scalar() or 0
+def get_total_contacts(db: Session, wa_account: Optional[str] = None) -> int:
+    query = db.query(func.count(Contact.id))
+    if wa_account:
+        query = query.filter(Contact.wa_account == wa_account)
+    return query.scalar() or 0
 
 
 def sync_whatsapp_contacts(db: Session) -> dict:
@@ -135,63 +157,85 @@ def sync_whatsapp_contacts(db: Session) -> dict:
     elif connection_type == "bridge":
         import httpx
         try:
-            r = httpx.get("http://localhost:3000/contacts", timeout=20.0)
+            r = httpx.get("http://localhost:3000/contacts", timeout=30.0)
             if r.status_code != 200:
-                raise Exception(f"Bridge returned status code {r.status_code}")
-                
+                raise Exception(f"Bridge returned status {r.status_code}: {r.text[:200]}")
+
             res_data = r.json()
             wa_contacts = res_data.get("contacts", [])
-            
-            synced_count = 0
+            total_from_bridge = len(wa_contacts)
+
+            if total_from_bridge == 0:
+                raise Exception(
+                    "WhatsApp bridge returned 0 contacts. "
+                    "Make sure WhatsApp is connected and your phone has contacts. "
+                    "Try disconnecting and reconnecting WhatsApp."
+                )
+
+            new_count = 0
+            updated_count = 0
+
             for wc in wa_contacts:
-                phone = wc["phone"]
-                name = wc["name"]
+                phone = wc.get("phone", "").strip()
+                name = wc.get("name", "").strip()
                 c_type = wc.get("type", "User")
-                
-                # Exclude broadcast lists (Teams) from sync to prevent cluttering
+
+                if not phone or not name:
+                    continue
+
+                # Exclude broadcast lists from sync
                 if c_type == "Broadcast":
                     continue
 
-                # Determine tag based on contact type
-                type_tag = None
-                if c_type == "Group":
-                    type_tag = "Group"
-                
-                # Check if contact already exists
+                type_tag = "Group" if c_type == "Group" else None
+
                 existing = db.query(Contact).filter(Contact.phone == phone).first()
+                current_phone = session.phone or ""
                 if existing:
-                    updated = False
+                    changed = False
                     if existing.name != name:
                         existing.name = name
-                        updated = True
-                    
-                    # Manage tags
+                        changed = True
+                    if existing.wa_account != current_phone:
+                        existing.wa_account = current_phone
+                        changed = True
+
                     curr_tags = existing.tags or []
                     if not isinstance(curr_tags, list):
                         curr_tags = []
-                    
-                    # Remove any existing type tags to avoid duplicates
-                    curr_tags = [t for t in curr_tags if t not in ["Group", "Team", "User"]]
+                    new_tags = [t for t in curr_tags if t not in ["Group", "Team", "User"]]
                     if type_tag:
-                        curr_tags.append(type_tag)
-                    
-                    # Update tags if changed
-                    if existing.tags != curr_tags:
-                        existing.tags = curr_tags
-                        updated = True
-                    
-                    if updated:
+                        new_tags.append(type_tag)
+                    if existing.tags != new_tags:
+                        existing.tags = new_tags
+                        changed = True
+
+                    if changed:
                         db.add(existing)
-                        synced_count += 1
+                        updated_count += 1
                 else:
-                    # Insert new contact
                     tags = [type_tag] if type_tag else []
-                    contact = Contact(name=name, phone=phone, is_active=True, tags=tags)
+                    contact = Contact(name=name, phone=phone, is_active=True, tags=tags, wa_account=current_phone)
                     db.add(contact)
-                    synced_count += 1
-                    
+                    new_count += 1
+
             db.commit()
-            return {"success": True, "message": f"Successfully synced {synced_count} contacts from your phone."}
+
+            total_in_db = db.query(Contact).count()
+            parts = []
+            if new_count > 0:
+                parts.append(f"{new_count} new")
+            if updated_count > 0:
+                parts.append(f"{updated_count} updated")
+
+            change_str = ", ".join(parts) if parts else "no changes"
+            return {
+                "success": True,
+                "message": (
+                    f"Sync complete: {total_from_bridge} contacts from WhatsApp "
+                    f"({change_str}). Total in database: {total_in_db}."
+                )
+            }
         except Exception as e:
             logger.error(f"Failed to sync contacts from bridge: {e}")
             raise Exception(f"Failed to sync contacts: {str(e)}")

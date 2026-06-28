@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import Layout from './components/Layout/Layout'
 import Dashboard from './pages/Dashboard/Dashboard'
 import Automations from './pages/Automations/Automations'
@@ -7,21 +7,22 @@ import Messages from './pages/Messages/Messages'
 import Logs from './pages/Logs/Logs'
 import Settings from './pages/Settings/Settings'
 import Campaigns from './pages/Campaigns/Campaigns'
+import Profile from './pages/Profile/Profile'
+import Status from './pages/Status/Status'
 import Login from './pages/Login/Login'
 import { useApp } from './context/AppContext'
 
 function ProtectedRoute() {
-  const { sessionStatus, loadingSession, profile } = useApp()
-  const location = useLocation()
+  const { sessionStatus, loadingSession } = useApp()
 
   if (loadingSession) {
     return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        height: '100vh', 
-        background: 'radial-gradient(circle at center, #1a202c 0%, #0d1117 100%)', 
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        height: '100vh',
+        background: 'radial-gradient(circle at center, #1a202c 0%, #0d1117 100%)',
         color: 'var(--text-muted)',
         fontFamily: 'system-ui, sans-serif'
       }}>
@@ -34,7 +35,7 @@ function ProtectedRoute() {
             borderRadius: '50%',
             animation: 'spin 1s linear infinite'
           }} />
-          <div>Synchronizing WhatsApp Session...</div>
+          <div>Connecting to WhatsApp...</div>
         </div>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
@@ -45,17 +46,12 @@ function ProtectedRoute() {
     return <Navigate to="/login" replace />
   }
 
-  // Force profile details configuration first if not set
-  if (sessionStatus?.status === 'connected' && !profile.isProfileConfigured && location.pathname !== '/settings') {
-    return <Navigate to="/settings" state={{ fromLogin: true }} replace />
-  }
-
   return <Outlet />
 }
 
 function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
         <Route path="login" element={<Login />} />
         
@@ -69,6 +65,8 @@ function App() {
             <Route path="campaigns" element={<Campaigns />} />
             <Route path="logs" element={<Logs />} />
             <Route path="settings" element={<Settings />} />
+            <Route path="profile" element={<Profile />} />
+            <Route path="status" element={<Status />} />
           </Route>
         </Route>
 

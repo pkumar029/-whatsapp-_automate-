@@ -1,633 +1,774 @@
-import { useState, useEffect } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
-import { Settings as SettingsIcon, Wifi, WifiOff, QrCode, LogOut, Save, RefreshCw, Shield, Bell, HelpCircle, User, Lock } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import {
+  UserCircle, Shield, Lock, MessageSquare, Bell, HelpCircle,
+  ChevronRight, ChevronLeft, Camera, LogOut, RefreshCw,
+  QrCode, Hash, Wifi, WifiOff, Smartphone, Phone,
+  Sun, Moon, Volume2, VolumeX, Timer, Ban, Monitor,
+  Info, Globe, Key, Check, X, Eye, EyeOff, Send,
+  Keyboard, AlertCircle, CheckCircle2, Zap, Database,
+  Image as ImageIcon, Archive
+} from 'lucide-react'
 import { whatsappApi } from '../../services/api'
 import { useApp } from '../../context/AppContext'
 import { formatIST } from '../../utils/date'
 import { getErrorMessage } from '../../utils/error'
 
+// ─── Palette ────────────────────────────────────────────────────
+const WA = {
+  bg: '#111b21',
+  panel: '#202c33',
+  row: '#1f2c34',
+  border: '#2a3942',
+  text: '#e9edef',
+  sub: '#8696a0',
+  green: '#25D366',
+  red: '#ff4d4f',
+  input: '#2a3942',
+}
 
-export default function Settings() {
-  const { theme, setTheme, profile, updateProfile, changePassword, refreshSessionStatus } = useApp()
-  const location = useLocation()
-  const navigate = useNavigate()
+// ─── Shared primitives ──────────────────────────────────────────
+function Row({ icon, iconBg, label, sublabel, right, onClick, danger, last }) {
+  const [h, setH] = useState(false)
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setH(true)}
+      onMouseLeave={() => setH(false)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 14,
+        padding: '13px 20px',
+        cursor: onClick ? 'pointer' : 'default',
+        background: h && onClick ? 'rgba(255,255,255,0.04)' : 'transparent',
+        borderBottom: last ? 'none' : `1px solid ${WA.border}`,
+        transition: 'background .12s',
+      }}
+    >
+      {icon && (
+        <div style={{ width: 38, height: 38, borderRadius: '50%', background: iconBg || WA.border, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          {icon}
+        </div>
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 15, color: danger ? WA.red : WA.text, fontWeight: 400 }}>{label}</div>
+        {sublabel && <div style={{ fontSize: 12, color: WA.sub, marginTop: 2 }}>{sublabel}</div>}
+      </div>
+      {right !== undefined
+        ? <div style={{ color: WA.sub, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            {right}
+            {onClick && <ChevronRight size={15} style={{ color: '#3b4a54' }} />}
+          </div>
+        : onClick
+        ? <ChevronRight size={15} style={{ color: '#3b4a54', flexShrink: 0 }} />
+        : null}
+    </div>
+  )
+}
 
-  const [status, setStatus] = useState({ status: 'disconnected' })
-  const [connecting, setConnecting] = useState(false)
-  const [qrCode, setQrCode] = useState(null)
-  const [message, setMessage] = useState('')
-  const [errorMsg, setErrorMsg] = useState('')
+function Toggle({ on, onChange }) {
+  return (
+    <div onClick={onChange} style={{ width: 44, height: 24, borderRadius: 12, background: on ? WA.green : '#3b4a54', position: 'relative', cursor: 'pointer', transition: 'background .2s', flexShrink: 0 }}>
+      <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#fff', position: 'absolute', top: 2, left: on ? 22 : 2, transition: 'left .2s', boxShadow: '0 1px 4px rgba(0,0,0,.4)' }} />
+    </div>
+  )
+}
 
-  // Connection options state
-  const [connectionType, setConnectionType] = useState('bridge') // dev, meta, bridge
+function SelectInput({ value, onChange, options }) {
+  return (
+    <select
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      onClick={e => e.stopPropagation()}
+      style={{ background: WA.input, border: `1px solid ${WA.border}`, borderRadius: 8, color: WA.sub, padding: '5px 10px', fontSize: 13, cursor: 'pointer', outline: 'none' }}
+    >
+      {options.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
+    </select>
+  )
+}
 
+function SecLabel({ children }) {
+  return <div style={{ padding: '16px 20px 6px', fontSize: 12, color: WA.green, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase' }}>{children}</div>
+}
+
+function PanelHeader({ title, onBack }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 20px', background: WA.panel, borderBottom: `1px solid ${WA.border}`, position: 'sticky', top: 0, zIndex: 2 }}>
+      {onBack && (
+        <button onClick={onBack} style={{ background: 'none', border: 'none', cursor: 'pointer', color: WA.sub, display: 'flex', alignItems: 'center', padding: 4, borderRadius: '50%' }}>
+          <ChevronLeft size={20} />
+        </button>
+      )}
+      <span style={{ fontSize: 17, fontWeight: 600, color: WA.text }}>{title}</span>
+    </div>
+  )
+}
+
+function Toast({ msg, type }) {
+  if (!msg) return null
+  const ok = type !== 'error'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 8, fontSize: 13, margin: '0 20px 12px', background: ok ? 'rgba(37,211,102,.1)' : 'rgba(255,77,79,.1)', border: `1px solid ${ok ? 'rgba(37,211,102,.3)' : 'rgba(255,77,79,.3)'}`, color: ok ? WA.green : WA.red }}>
+      {ok ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />} {msg}
+    </div>
+  )
+}
+
+// ─── Connect Panel ───────────────────────────────────────────────
+function ConnectPanel({ onConnected }) {
+  const { refreshSessionStatus } = useApp()
+  const [step, setStep] = useState('form')
+  const [method, setMethod] = useState('qr')
   const [phone, setPhone] = useState('')
-  const [bridgeLinkMethod, setBridgeLinkMethod] = useState('qr') // qr or otp
-  
-  // Meta API specific fields
-  const [metaToken, setMetaToken] = useState('')
-  const [metaPhoneNumberId, setMetaPhoneNumberId] = useState('')
-  const [metaBusinessAccountId, setMetaBusinessAccountId] = useState('')
-
-  // Profile forms state
-  const [profileName, setProfileName] = useState(profile.name)
-  const [profileEmail, setProfileEmail] = useState(profile.email)
-  const [profileCompany, setProfileCompany] = useState(profile.company || '')
-  const [profileRole, setProfileRole] = useState(profile.role || '')
-  const [profileMessage, setProfileMessage] = useState('')
-  const [profileError, setProfileError] = useState('')
-  const [savingProfile, setSavingProfile] = useState(false)
-
-  // Security forms state
-  const [currentPassword, setCurrentPassword] = useState('')
-  const [newPassword, setNewPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [securityMessage, setSecurityMessage] = useState('')
-  const [securityError, setSecurityError] = useState('')
-  const [savingSecurity, setSavingSecurity] = useState(false)
-
-  const handleSaveProfile = async (e) => {
-    e.preventDefault()
-    setSavingProfile(true)
-    setProfileMessage('')
-    setProfileError('')
-    try {
-      const isFirstTime = !profile.isProfileConfigured
-      await new Promise(r => setTimeout(r, 600))
-      updateProfile({
-        name: profileName,
-        email: profileEmail,
-        company: profileCompany,
-        role: profileRole
-      })
-      if (isFirstTime) {
-        setProfileMessage('Profile settings saved! Redirecting you to the dashboard...')
-        setTimeout(() => {
-          navigate('/dashboard')
-        }, 1500)
-      } else {
-        setProfileMessage('Profile settings saved successfully!')
-      }
-    } catch (err) {
-      setProfileError('Failed to save profile settings.')
-    } finally {
-      setSavingProfile(false)
-    }
-  }
-
-  const handleUpdatePassword = async (e) => {
-    e.preventDefault()
-    setSavingSecurity(true)
-    setSecurityMessage('')
-    setSecurityError('')
-
-    if (newPassword !== confirmPassword) {
-      setSecurityError('New passwords do not match.')
-      setSavingSecurity(false)
-      return
-    }
-
-    try {
-      const res = await changePassword(currentPassword, newPassword)
-      setSecurityMessage(res.message || 'Password changed successfully!')
-      setCurrentPassword('')
-      setNewPassword('')
-      setConfirmPassword('')
-    } catch (err) {
-      setSecurityError(err.message || 'Failed to update password.')
-    } finally {
-      setSavingSecurity(false)
-    }
-  }
-
+  const [qrCode, setQrCode] = useState(null)
+  const [pairingCode, setPairingCode] = useState(null)
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    whatsappApi.getStatus().then(res => {
-      setStatus(res.data)
-      if (res.data?.connection_type) {
-        setConnectionType(res.data.connection_type)
-      }
-    }).catch(() => { })
-  }, [])
-
-  // Poll status when connecting
-  useEffect(() => {
-    let interval = null;
-    if (status.status === 'connecting') {
-      interval = setInterval(() => {
-        whatsappApi.getStatus().then(res => {
-          setStatus(res.data);
-          if (res.data?.qr) {
-            setQrCode(res.data.qr);
-          } else {
-            setQrCode(null);
-          }
-        }).catch(() => { })
-      }, 3000);
+    let iv = null
+    if (['connecting', 'qr', 'otp'].includes(step)) {
+      iv = setInterval(async () => {
+        try {
+          const r = await whatsappApi.getStatus()
+          const d = r.data
+          if (d?.qr && step !== 'qr') { setQrCode(d.qr); setStep('qr') }
+          if (d?.pairing_code && step !== 'otp') { setPairingCode(d.pairing_code); setStep('otp') }
+          if (d?.status === 'connected') { clearInterval(iv); await refreshSessionStatus(); onConnected?.() }
+        } catch { }
+      }, 3000)
     }
-    return () => {
-      if (interval) clearInterval(interval);
-    }
-  }, [status.status])
+    return () => clearInterval(iv)
+  }, [step])
 
-  const handleConnect = async (e) => {
-    if (e) e.preventDefault();
-    setConnecting(true);
-    setMessage('');
-    setErrorMsg('');
-    setQrCode(null);
-
-    const config = {
-      connection_type: connectionType,
-      phone: phone || undefined,
-      link_method: connectionType === 'bridge' ? bridgeLinkMethod : undefined,
-      meta_token: connectionType === 'meta' ? metaToken : undefined,
-      meta_phone_number_id: connectionType === 'meta' ? metaPhoneNumberId : undefined,
-      meta_business_account_id: connectionType === 'meta' ? metaBusinessAccountId : undefined
-    }
-
+  const submit = async (e) => {
+    e.preventDefault(); setError(''); setStep('connecting')
     try {
-      const res = await whatsappApi.connect(config);
-      if (res.data?.qr) {
-        setQrCode(res.data.qr);
-      }
-      
-      if (res.data?.status === 'connected') {
-        setMessage(res.data.message || 'Connected successfully!');
-        setStatus(prev => ({ ...prev, status: 'connected', phone: phone || res.data.phone || 'Dev Session', connection_type: connectionType }));
-        await refreshSessionStatus();
-      } else {
-        setMessage(res.data.message || 'Connecting... Please wait.');
-        setStatus(prev => ({ ...prev, status: 'connecting', connection_type: connectionType }));
-        await refreshSessionStatus();
-      }
-    } catch (err) {
-      setErrorMsg(getErrorMessage(err, 'Connection failed.'));
-    } finally {
-      setConnecting(false);
-    }
+      const r = await whatsappApi.connect({ connection_type: 'bridge', phone: phone || undefined, link_method: method })
+      const d = r.data
+      if (d?.qr) { setQrCode(d.qr); setStep('qr') }
+      else if (d?.pairing_code) { setPairingCode(d.pairing_code); setStep('otp') }
+      else if (d?.status === 'connected') { await refreshSessionStatus(); onConnected?.() }
+      else setStep(method === 'otp' ? 'otp' : 'qr')
+    } catch (err) { setError(getErrorMessage(err, 'Connection failed.')); setStep('form') }
   }
 
-  const handleDisconnect = async () => {
-    try {
-      await whatsappApi.disconnect()
-      await refreshSessionStatus()
-      setStatus({ status: 'disconnected' });
-      setQrCode(null);
-      setMessage('WhatsApp session disconnected.');
-      setErrorMsg('');
-    } catch (err) {
-      setErrorMsg('Failed to disconnect session.');
-    }
+  const cancel = async () => {
+    try { await whatsappApi.disconnect() } catch { }
+    setStep('form'); setQrCode(null); setPairingCode(null); setError('')
   }
 
-  const isConnected = status.status === 'connected'
-  const isConnecting = status.status === 'connecting'
+  if (step === 'form') return (
+    <div style={{ padding: '16px 20px' }}>
+      {error && <div style={{ background: 'rgba(255,77,79,.1)', border: '1px solid rgba(255,77,79,.3)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 13, color: WA.red }}>{error}</div>}
+      <form onSubmit={submit}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+          {[{ v: 'qr', icon: QrCode, label: 'QR Code' }, { v: 'otp', icon: Hash, label: 'Pairing Code' }].map(({ v, icon: Icon, label }) => (
+            <button key={v} type="button" onClick={() => setMethod(v)}
+              style={{ flex: 1, padding: '10px', borderRadius: 10, cursor: 'pointer', border: `2px solid ${method === v ? WA.green : WA.border}`, background: method === v ? 'rgba(37,211,102,.08)' : WA.row, color: method === v ? WA.green : WA.sub, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, fontSize: 13, fontWeight: 500 }}>
+              <Icon size={15} />{label}
+            </button>
+          ))}
+        </div>
+        <label style={{ display: 'block', fontSize: 12, color: WA.sub, marginBottom: 6 }}>Phone number with country code</label>
+        <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+91 98765 43210" required
+          style={{ width: '100%', padding: '11px 14px', boxSizing: 'border-box', background: WA.row, border: `1px solid ${WA.border}`, borderRadius: 10, color: WA.text, fontSize: 15, outline: 'none', marginBottom: 4 }}
+          onFocus={e => e.target.style.borderColor = WA.green}
+          onBlur={e => e.target.style.borderColor = WA.border}
+        />
+        <div style={{ fontSize: 11, color: WA.sub, marginBottom: 14 }}>Requires bridge running on port 3000</div>
+        <button type="submit" style={{ width: '100%', padding: '12px', borderRadius: 10, border: 'none', background: WA.green, color: '#111b21', fontWeight: 700, fontSize: 15, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          {method === 'qr' ? <><QrCode size={16} />Generate QR Code</> : <><Hash size={16} />Generate Pairing Code</>}
+        </button>
+      </form>
+    </div>
+  )
+
+  if (step === 'connecting') return (
+    <div style={{ padding: '28px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+      <div style={{ width: 40, height: 40, border: `3px solid ${WA.border}`, borderTop: `3px solid ${WA.green}`, borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+      <div style={{ color: WA.sub, fontSize: 14 }}>Initialising WhatsApp bridge…</div>
+      <button onClick={cancel} style={{ background: 'none', border: `1px solid ${WA.border}`, borderRadius: 8, color: WA.sub, padding: '7px 18px', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+    </div>
+  )
+
+  if (step === 'qr') return (
+    <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+      <div style={{ background: '#fff', padding: 12, borderRadius: 12, width: 220, height: 220 }}>
+        {qrCode ? <img src={`data:image/png;base64,${qrCode}`} alt="QR" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+          : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><RefreshCw size={32} color={WA.green} style={{ animation: 'spin 1s linear infinite' }} /></div>}
+      </div>
+      <div style={{ textAlign: 'center', fontSize: 13, color: WA.sub, lineHeight: 1.7, maxWidth: 280 }}>
+        Open <b style={{ color: WA.text }}>WhatsApp</b> on your phone<br />
+        → <b style={{ color: WA.text }}>Settings</b> → <b style={{ color: WA.text }}>Linked Devices</b><br />
+        → <b style={{ color: WA.text }}>Link a Device</b>
+      </div>
+      <button onClick={cancel} style={{ background: 'none', border: `1px solid ${WA.border}`, borderRadius: 8, color: WA.sub, padding: '7px 18px', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+    </div>
+  )
+
+  if (step === 'otp') return (
+    <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+      <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: 8, color: WA.green, fontFamily: 'monospace', background: WA.row, padding: '14px 28px', borderRadius: 12, border: `2px dashed ${WA.green}`, userSelect: 'all' }}>
+        {pairingCode || '- - - - - - - -'}
+      </div>
+      <div style={{ textAlign: 'center', fontSize: 13, color: WA.sub, lineHeight: 1.8, maxWidth: 300 }}>
+        On your phone: <b style={{ color: WA.text }}>WhatsApp</b> → <b style={{ color: WA.text }}>Linked Devices</b><br />
+        → <b style={{ color: WA.text }}>Link a Device</b><br />
+        → <b style={{ color: WA.text }}>Link with phone number instead</b><br />
+        Enter the code above
+      </div>
+      <button onClick={cancel} style={{ background: 'none', border: `1px solid ${WA.border}`, borderRadius: 8, color: WA.sub, padding: '7px 18px', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+    </div>
+  )
+  return null
+}
+
+// ─── Section: Profile ────────────────────────────────────────────
+function ProfileSection() {
+  const { profile, updateProfile } = useApp()
+  const fileRef = useRef()
+  const [avatar, setAvatar] = useState(profile.avatar || null)
+  const [name, setName] = useState(profile.name || '')
+  const [about, setAbout] = useState(profile.about || 'Hey there! I am using WhatsApp.')
+  const [editName, setEditName] = useState(false)
+  const [editAbout, setEditAbout] = useState(false)
+  const [saved, setSaved] = useState('')
+
+  const save = (fields) => {
+    updateProfile(fields)
+    setSaved('Saved'); setTimeout(() => setSaved(''), 2000)
+  }
+
+  const handleAvatar = (e) => {
+    const file = e.target.files[0]; if (!file) return
+    const reader = new FileReader()
+    reader.onload = ev => { setAvatar(ev.target.result); save({ avatar: ev.target.result }) }
+    reader.readAsDataURL(file)
+  }
+
+  const initial = name ? name.charAt(0).toUpperCase() : '?'
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <h2 className="page-title">Settings</h2>
-          <p className="page-subtitle">Configure WhatsApp session connection and application preferences</p>
+      {/* Big avatar */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '28px 20px 20px', borderBottom: `1px solid ${WA.border}` }}>
+        <div style={{ position: 'relative', marginBottom: 16 }}>
+          <div style={{ width: 120, height: 120, borderRadius: '50%', background: avatar ? 'transparent' : 'linear-gradient(135deg,#25D366,#128C7E)', border: `3px solid ${WA.green}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48, fontWeight: 700, color: '#fff', overflow: 'hidden', cursor: 'pointer' }} onClick={() => fileRef.current?.click()}>
+            {avatar ? <img src={avatar} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : initial}
+          </div>
+          <button onClick={() => fileRef.current?.click()} style={{ position: 'absolute', bottom: 4, right: 4, width: 32, height: 32, borderRadius: '50%', background: WA.green, border: `2px solid ${WA.bg}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#111b21' }}>
+            <Camera size={15} />
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatar} />
         </div>
+        {saved && <div style={{ fontSize: 12, color: WA.green, display: 'flex', alignItems: 'center', gap: 4 }}><Check size={12} />{saved}</div>}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+      {/* Name */}
+      <SecLabel>Your name</SecLabel>
+      <div style={{ padding: '4px 20px 16px' }}>
+        {editName ? (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input autoFocus value={name} onChange={e => setName(e.target.value)}
+              style={{ flex: 1, padding: '10px 14px', background: WA.row, border: `1px solid ${WA.green}`, borderRadius: 10, color: WA.text, fontSize: 15, outline: 'none' }} />
+            <button onClick={() => { save({ name }); setEditName(false) }} style={{ width: 36, height: 36, borderRadius: '50%', background: WA.green, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Check size={16} color="#111b21" /></button>
+            <button onClick={() => { setName(profile.name || ''); setEditName(false) }} style={{ width: 36, height: 36, borderRadius: '50%', background: WA.border, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={16} color={WA.sub} /></button>
+          </div>
+        ) : (
+          <div onClick={() => setEditName(true)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', padding: '10px 0', borderBottom: `1px solid ${WA.border}` }}>
+            <span style={{ fontSize: 16, color: name ? WA.text : WA.sub }}>{name || 'Enter your name'}</span>
+            <span style={{ fontSize: 12, color: WA.green }}>Edit</span>
+          </div>
+        )}
+        <div style={{ fontSize: 12, color: WA.sub, marginTop: 8 }}>This is not your username or PIN. Your name is visible to your WhatsApp contacts.</div>
+      </div>
 
-        {/* WhatsApp Session Card */}
-        <div className="card" style={{ gridColumn: '1 / -1' }}>
-          <div className="card-header" style={{ borderBottom: '1px solid var(--border-primary)', paddingBottom: 12, marginBottom: 16 }}>
-            <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {isConnected ? <Wifi size={18} color="var(--accent-primary)" /> : <WifiOff size={18} color="var(--accent-rose)" />}
-              WhatsApp Connection Setup
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {status.connection_type && (
-                <span className="badge" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-primary)' }}>
-                  Mode: {status.connection_type.toUpperCase()}
-                </span>
-              )}
-              <span className={`badge ${isConnected ? 'badge-green' : isConnecting ? 'badge-orange' : 'badge-red'}`}>
-                {isConnected ? 'Connected' : isConnecting ? 'Connecting' : 'Disconnected'}
-              </span>
+      {/* About */}
+      <SecLabel>About</SecLabel>
+      <div style={{ padding: '4px 20px 20px' }}>
+        {editAbout ? (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <textarea autoFocus value={about} onChange={e => setAbout(e.target.value)} rows={3}
+              style={{ flex: 1, padding: '10px 14px', background: WA.row, border: `1px solid ${WA.green}`, borderRadius: 10, color: WA.text, fontSize: 15, outline: 'none', resize: 'none', fontFamily: 'inherit' }} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <button onClick={() => { save({ about }); setEditAbout(false) }} style={{ width: 36, height: 36, borderRadius: '50%', background: WA.green, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Check size={16} color="#111b21" /></button>
+              <button onClick={() => { setAbout(profile.about || 'Hey there! I am using WhatsApp.'); setEditAbout(false) }} style={{ width: 36, height: 36, borderRadius: '50%', background: WA.border, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={16} color={WA.sub} /></button>
             </div>
           </div>
+        ) : (
+          <div onClick={() => setEditAbout(true)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', padding: '10px 0', borderBottom: `1px solid ${WA.border}` }}>
+            <span style={{ fontSize: 15, color: WA.text, flex: 1, marginRight: 12, lineHeight: 1.5 }}>{about}</span>
+            <span style={{ fontSize: 12, color: WA.green, flexShrink: 0 }}>Edit</span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
-          {message && (
-            <div style={{ background: 'var(--accent-primary-muted)', border: '1px solid rgba(37,211,102,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 14px', marginBottom: 16, fontSize: 'var(--font-size-sm)', color: 'var(--accent-primary)' }}>
-              {message}
-            </div>
-          )}
+// ─── Section: Account ────────────────────────────────────────────
+function AccountSection() {
+  const { sessionStatus, refreshSessionStatus } = useApp()
+  const [waStatus, setWaStatus] = useState({ status: 'disconnected' })
+  const [showConnect, setShowConnect] = useState(false)
+  const [disconnecting, setDisconnecting] = useState(false)
+  const [secNotif, setSecNotif] = useState(true)
 
-          {errorMsg && (
-            <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 14px', marginBottom: 16, fontSize: 'var(--font-size-sm)', color: 'var(--accent-rose)' }}>
-              {errorMsg}
-            </div>
-          )}
+  useEffect(() => {
+    whatsappApi.getStatus().then(r => setWaStatus(r.data)).catch(() => { })
+    const iv = setInterval(() => whatsappApi.getStatus().then(r => setWaStatus(r.data)).catch(() => { }), 5000)
+    return () => clearInterval(iv)
+  }, [])
 
-          {isConnected ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', padding: '10px 0' }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>Connected Mode</div>
-                <div style={{ fontSize: 'var(--font-size-md)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
-                  {status.connection_type === 'dev' ? '🔧 Option 1 — Development Bypass' : 
-                   status.connection_type === 'meta' ? '🏢 Option 2 — Meta Official Cloud API' : 
-                   '📱 Option 3 — whatsapp-web.js Web Bridge'}
-                </div>
-                <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>Active Phone Number / ID</div>
-                <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>{status.phone || 'Unknown'}</div>
-                {status.connected_at && <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginTop: 4 }}>Since {formatIST(status.connected_at)}</div>}
-              </div>
-              <button className="btn btn-danger" onClick={handleDisconnect}>
-                <LogOut size={16} /> Disconnect Session
-              </button>
-            </div>
-          ) : isConnecting ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '20px 0' }}>
-              {status.pairing_code ? (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-                  <div style={{ fontSize: '36px', fontWeight: 800, color: 'var(--accent-primary)', letterSpacing: 4, background: 'var(--bg-secondary)', padding: '14px 28px', borderRadius: 'var(--radius-md)', border: '1px dashed var(--accent-primary)', fontFamily: 'monospace' }}>
-                    {status.pairing_code}
-                  </div>
-                  <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', textAlign: 'center', maxWidth: 450, lineHeight: 1.6 }}>
-                    <strong>Link with phone number instead:</strong><br />
-                    1. Open WhatsApp on your phone.<br />
-                    2. Go to <strong>Settings</strong> &rarr; <strong>Linked Devices</strong> &rarr; <strong>Link a Device</strong>.<br />
-                    3. Tap <strong>Link with phone number instead</strong> at the bottom.<br />
-                    4. Enter the 8-character pairing code shown above.
-                  </div>
-                </div>
-              ) : qrCode ? (
-                <div className="qr-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-                  <div className="qr-box" style={{ background: '#fff', padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-primary)', width: 220, height: 220 }}>
-                    <img src={`data:image/png;base64,${qrCode}`} alt="WhatsApp QR Code" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-                  </div>
-                  <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', textAlign: 'center', maxWidth: 400 }}>
-                    <strong>Scan this QR code with WhatsApp:</strong><br />
-                    Open WhatsApp &rarr; Settings &rarr; Linked Devices &rarr; Link a Device
-                  </div>
-                </div>
-              ) : (
-                <div style={{ textAlign: 'center' }}>
-                  <RefreshCw size={48} className="animate-spin" color="var(--accent-primary)" style={{ margin: '0 auto 12px', animation: 'spin 1.5s linear infinite' }} />
-                  <p style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>
-                    Initializing connection. Waiting for response, QR code, or pairing code...
-                  </p>
-                </div>
-              )}
-              <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
-                <button className="btn btn-secondary" onClick={handleDisconnect}>
-                  Cancel Connection
-                </button>
-              </div>
-            </div>
+  const disconnect = async () => {
+    setDisconnecting(true)
+    try { await whatsappApi.disconnect(); await refreshSessionStatus(); setWaStatus({ status: 'disconnected' }) } catch { }
+    finally { setDisconnecting(false) }
+  }
+
+  const isConn = waStatus.status === 'connected'
+  const isConn2 = waStatus.status === 'connecting'
+
+  return (
+    <div>
+      {/* Linked device status */}
+      <SecLabel>Linked Device</SecLabel>
+      <div style={{ margin: '4px 20px 12px', borderRadius: 12, overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: isConn ? 'rgba(37,211,102,.07)' : 'rgba(255,77,79,.07)' }}>
+          <div style={{ width: 44, height: 44, borderRadius: '50%', background: isConn ? 'rgba(37,211,102,.15)' : 'rgba(255,77,79,.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            {isConn ? <Wifi size={20} color={WA.green} /> : isConn2 ? <RefreshCw size={20} color="orange" style={{ animation: 'spin 1s linear infinite' }} /> : <WifiOff size={20} color={WA.red} />}
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: WA.text }}>{isConn ? 'WhatsApp Connected' : isConn2 ? 'Connecting…' : 'Not Connected'}</div>
+            <div style={{ fontSize: 13, color: WA.sub }}>{isConn ? (waStatus.phone || 'Session active') : 'No active WhatsApp session'}</div>
+            {waStatus.connected_at && isConn && <div style={{ fontSize: 11, color: WA.sub, marginTop: 2 }}>Since {formatIST(waStatus.connected_at)}</div>}
+          </div>
+          {isConn && <span style={{ background: WA.green, color: '#111b21', borderRadius: 20, padding: '2px 10px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>LIVE</span>}
+        </div>
+        <div style={{ padding: '12px 16px', borderTop: `1px solid ${WA.border}` }}>
+          {isConn ? (
+            <button onClick={disconnect} disabled={disconnecting}
+              style={{ width: '100%', padding: '10px', borderRadius: 8, border: `1px solid rgba(255,77,79,.4)`, background: 'rgba(255,77,79,.08)', color: WA.red, fontWeight: 600, fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <LogOut size={15} />{disconnecting ? 'Disconnecting…' : 'Log Out (Disconnect)'}
+            </button>
           ) : (
-            <div>
-              {/* Form Input fields for whatsapp-web.js Web Bridge only */}
-              <form onSubmit={handleConnect} style={{ background: 'var(--bg-tertiary)', padding: 16, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-primary)' }}>
-                <h4 style={{ margin: '0 0 14px 0', fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
-                  Configure whatsapp-web.js Web Bridge
-                </h4>
-
-                <div>
-                  <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--font-size-sm)', cursor: 'pointer', color: 'var(--text-primary)' }}>
-                      <input 
-                        type="radio" 
-                        name="bridge_method" 
-                        checked={bridgeLinkMethod === 'qr'} 
-                        onChange={() => setBridgeLinkMethod('qr')} 
-                      />
-                      Scan QR Code
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--font-size-sm)', cursor: 'pointer', color: 'var(--text-primary)' }}>
-                      <input 
-                        type="radio" 
-                        name="bridge_method" 
-                        checked={bridgeLinkMethod === 'otp'} 
-                        onChange={() => setBridgeLinkMethod('otp')} 
-                      />
-                      Use Pairing Code (OTP)
-                    </label>
-                  </div>
-
-                  <div style={{ marginBottom: 16 }}>
-                    <label style={{ display: 'block', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: 6 }}>
-                      {bridgeLinkMethod === 'qr' 
-                        ? 'Verification Phone Number * (Scanned account must match this number for high security, with Country Code: +91xxxxxx)' 
-                        : 'Phone Number * (Required to generate pairing code, with Country Code: +91xxxxxx)'}
-                    </label>
-                    <input 
-                      type="text" 
-                      className="form-input" 
-                      placeholder="+91xxxxxx" 
-                      value={phone} 
-                      onChange={e => setPhone(e.target.value)} 
-                      required
-                    />
-                  </div>
-                  <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <HelpCircle size={12} />
-                    Requires the bridge Node process running on port 3000.
-                  </div>
-                </div>
-
-                <button type="submit" className="btn btn-primary btn-lg" disabled={connecting} style={{ marginTop: 12 }}>
-                  {connecting ? (
-                    <><RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> Initializing...</>
-                  ) : (
-                    <><QrCode size={16} /> 
-                      {bridgeLinkMethod === 'qr' ? 'Generate QR Code' : 'Generate Pairing Code'}
-                    </>
-                  )}
-                </button>
-              </form>
-            </div>
-          )}
-        </div>
-
-
-        {/* Profile Settings */}
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <User size={16} /> Profile Details
-            </span>
-          </div>
-
-          {!profile.isProfileConfigured && (
-            <div style={{
-              background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.12) 0%, rgba(37, 211, 102, 0.06) 100%)',
-              border: '1px solid rgba(139, 92, 246, 0.25)',
-              borderRadius: 'var(--radius-md)',
-              padding: '14px 16px',
-              marginBottom: 16,
-              backdropFilter: 'blur(10px)',
-              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)'
-            }}>
-              <h4 style={{ margin: '0 0 6px 0', color: '#fff', fontSize: 'var(--font-size-sm)', display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700 }}>
-                🚀 Complete Your Profile
-              </h4>
-              <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)', lineHeight: '1.5' }}>
-                Your WhatsApp account is linked! To finalize your workspace onboarding and unlock the dashboard, please enter your name and email.
-              </p>
-            </div>
-          )}
-
-          {profileMessage && (
-            <div style={{ background: 'var(--accent-primary-muted)', border: '1px solid rgba(37,211,102,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 14px', marginBottom: 16, fontSize: 'var(--font-size-sm)', color: 'var(--accent-primary)' }}>
-              {profileMessage}
-            </div>
-          )}
-
-          {profileError && (
-            <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 14px', marginBottom: 16, fontSize: 'var(--font-size-sm)', color: 'var(--accent-rose)' }}>
-              {profileError}
-            </div>
-          )}
-
-          <form onSubmit={handleSaveProfile} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 8 }}>
-              <div style={{ 
-                width: 64, 
-                height: 64, 
-                borderRadius: '50%', 
-                background: 'var(--gradient-purple)', 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center', 
-                fontSize: 24, 
-                fontWeight: 700, 
-                color: 'white',
-                boxShadow: 'var(--shadow-glow-purple)'
-              }}>
-                {profileName ? profileName.charAt(0).toUpperCase() : 'A'}
-              </div>
-              <div>
-                <div style={{ fontSize: 'var(--font-size-md)', fontWeight: 600, color: 'var(--text-primary)' }}>{profileName || 'User Avatar'}</div>
-                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>{profileRole || 'Role not set'}</div>
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Full Name</label>
-              <input 
-                type="text" 
-                className="form-input" 
-                placeholder="Enter a name"
-                value={profileName} 
-                onChange={e => setProfileName(e.target.value)} 
-                required
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Email Address</label>
-              <input 
-                type="email" 
-                className="form-input" 
-                placeholder="example@gmail.com"
-                value={profileEmail} 
-                onChange={e => setProfileEmail(e.target.value)} 
-                required
-              />
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div className="form-group">
-                <label className="form-label">Company Name</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  placeholder="WA Automate Inc."
-                  value={profileCompany} 
-                  onChange={e => setProfileCompany(e.target.value)} 
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Role</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  placeholder="Administrator"
-                  value={profileRole} 
-                  onChange={e => setProfileRole(e.target.value)} 
-                />
-              </div>
-            </div>
-
-            <button type="submit" className="btn btn-primary" disabled={savingProfile} style={{ alignSelf: 'flex-start' }}>
-              {savingProfile ? (
-                <><RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> Saving...</>
-              ) : (
-                <><Save size={14} /> Save Profile</>
-              )}
+            <button onClick={() => setShowConnect(v => !v)}
+              style={{ width: '100%', padding: '11px', borderRadius: 8, border: 'none', background: WA.green, color: '#111b21', fontWeight: 700, fontSize: 15, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <Smartphone size={16} />{showConnect ? 'Hide Setup' : 'Connect WhatsApp'}
             </button>
-          </form>
-        </div>
-
-        {/* Security & Password Settings */}
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Lock size={16} /> Security & Password
-            </span>
-          </div>
-
-          {securityMessage && (
-            <div style={{ background: 'var(--accent-primary-muted)', border: '1px solid rgba(37,211,102,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 14px', marginBottom: 16, fontSize: 'var(--font-size-sm)', color: 'var(--accent-primary)' }}>
-              {securityMessage}
-            </div>
           )}
-
-          {securityError && (
-            <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 14px', marginBottom: 16, fontSize: 'var(--font-size-sm)', color: 'var(--accent-rose)' }}>
-              {securityError}
-            </div>
-          )}
-
-          <form onSubmit={handleUpdatePassword} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div className="form-group">
-              <label className="form-label">Current Password</label>
-              <input 
-                type="password" 
-                className="form-input" 
-                placeholder="••••••••"
-                value={currentPassword} 
-                onChange={e => setCurrentPassword(e.target.value)} 
-                required
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">New Password</label>
-              <input 
-                type="password" 
-                className="form-input" 
-                placeholder="••••••••"
-                value={newPassword} 
-                onChange={e => setNewPassword(e.target.value)} 
-                required
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Confirm New Password</label>
-              <input 
-                type="password" 
-                className="form-input" 
-                placeholder="••••••••"
-                value={confirmPassword} 
-                onChange={e => setConfirmPassword(e.target.value)} 
-                required
-              />
-            </div>
-
-            <button type="submit" className="btn btn-secondary" disabled={savingSecurity} style={{ alignSelf: 'flex-start' }}>
-              {savingSecurity ? (
-                <><RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> Updating...</>
-              ) : (
-                <><Lock size={14} /> Update Password</>
-              )}
-            </button>
-          </form>
         </div>
-
-        {/* App Settings */}
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <SettingsIcon size={16} /> Application
-            </span>
+        {!isConn && showConnect && (
+          <div style={{ borderTop: `1px solid ${WA.border}` }}>
+            <ConnectPanel onConnected={async () => { setShowConnect(false); const r = await whatsappApi.getStatus(); setWaStatus(r.data) }} />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {/* Theme Settings Row */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-primary)' }}>
-              <div>
-                <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 500, color: 'var(--text-primary)' }}>Visual Theme Mode</div>
-                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>Toggle between Light and Dark interface theme</div>
-              </div>
-              <select 
-                className="form-input" 
-                style={{ width: 120, padding: '6px 10px', height: 34, background: 'var(--bg-secondary)', cursor: 'pointer' }}
-                value={theme}
-                onChange={e => setTheme(e.target.value)}
-              >
-                <option value="dark">🌙 Dark Mode</option>
-                <option value="light">☀️ Light Mode</option>
-              </select>
-            </div>
-
-            {[
-              { label: 'Auto Reconnect', desc: 'Reconnect session after disconnect', id: 'auto-reconnect' },
-              { label: 'Message Logging', desc: 'Save all messages to database', id: 'msg-logging' },
-              { label: 'Automation Engine', desc: 'Enable automation workflow runner', id: 'auto-engine' },
-            ].map(s => (
-              <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-primary)' }}>
-                <div>
-                  <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 500, color: 'var(--text-primary)' }}>{s.label}</div>
-                  <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>{s.desc}</div>
-                </div>
-                <label style={{ position: 'relative', display: 'inline-block', width: 42, height: 24, cursor: 'pointer' }}>
-                  <input type="checkbox" id={s.id} defaultChecked style={{ opacity: 0, width: 0, height: 0 }} />
-                  <span style={{ position: 'absolute', cursor: 'pointer', inset: 0, background: 'var(--accent-primary)', borderRadius: 24, transition: '0.3s' }} />
-                </label>
-              </div>
-            ))}
-          </div>
-        </div>
-
-
-        {/* Notifications */}
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Bell size={16} /> Notifications
-            </span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {[
-              { label: 'Automation Failures', desc: 'Alert when automation step fails', id: 'auto-fail' },
-              { label: 'Session Disconnected', desc: 'Alert when WhatsApp disconnects', id: 'sess-disc' },
-              { label: 'New Incoming Message', desc: 'Alert on new inbound message', id: 'new-msg' },
-            ].map(s => (
-              <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-primary)' }}>
-                <div>
-                  <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 500, color: 'var(--text-primary)' }}>{s.label}</div>
-                  <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>{s.desc}</div>
-                </div>
-                <label style={{ position: 'relative', display: 'inline-block', width: 42, height: 24, cursor: 'pointer' }}>
-                  <input type="checkbox" id={s.id} style={{ opacity: 0, width: 0, height: 0 }} />
-                  <span style={{ position: 'absolute', cursor: 'pointer', inset: 0, background: 'var(--bg-hover)', borderRadius: 24, border: '1px solid var(--border-primary)', transition: '0.3s' }} />
-                </label>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* API Info */}
-        <div className="card" style={{ gridColumn: '1 / -1' }}>
-          <div className="card-header">
-            <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Shield size={16} /> API & System Info
-            </span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
-            {[
-              { label: 'Backend API', value: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1' },
-              { label: 'App Version', value: import.meta.env.VITE_APP_VERSION || '1.0.0' },
-              { label: 'Environment', value: import.meta.env.VITE_APP_ENV || 'development' },
-            ].map(info => (
-              <div key={info.label} style={{ padding: 12, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-primary)' }}>
-                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>{info.label}</div>
-                <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'monospace' }}>{info.value}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+        )}
       </div>
 
+      {/* Account rows */}
+      <SecLabel>Account Info</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <Row icon={<Phone size={17} color="#fff" />} iconBg="#128C7E" label="Phone number" sublabel={waStatus.phone || 'Not connected'} />
+        <Row icon={<Smartphone size={17} color="#fff" />} iconBg="#0a7aff" label="Account type" sublabel="WhatsApp Web — Personal" />
+        <Row icon={<Key size={17} color="#fff" />} iconBg="#f59e0b" label="Security notifications" sublabel="Notify when your security code changes"
+          right={<Toggle on={secNotif} onChange={() => setSecNotif(v => !v)} />} last />
+      </div>
+
+      <SecLabel>Data</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <Row icon={<Info size={17} color="#fff" />} iconBg="#6366f1" label="Request account info" sublabel="Request a report of your account info" onClick={() => {}} />
+        <Row icon={<LogOut size={17} color="#fff" />} iconBg={WA.red} label="Delete account" sublabel="Delete your account and all data" danger onClick={() => {}} last />
+      </div>
+    </div>
+  )
+}
+
+// ─── Section: Privacy ────────────────────────────────────────────
+function PrivacySection() {
+  const WL = [{ v: 'everyone', label: 'Everyone' }, { v: 'contacts', label: 'My contacts' }, { v: 'nobody', label: 'Nobody' }]
+  const WLC = [{ v: 'everyone', label: 'Everyone' }, { v: 'contacts', label: 'My contacts' }]
+  const TL = [{ v: 'off', label: 'Off' }, { v: '24h', label: '24 hours' }, { v: '7d', label: '7 days' }, { v: '90d', label: '90 days' }]
+
+  const [lastSeen, setLastSeen] = useState('contacts')
+  const [photo, setPhoto] = useState('contacts')
+  const [about, setAbout] = useState('contacts')
+  const [status, setStatus] = useState('contacts')
+  const [readReceipts, setReadReceipts] = useState(true)
+  const [msgTimer, setMsgTimer] = useState('off')
+  const [disappearing, setDisappearing] = useState('off')
+  const [blocked, setBlocked] = useState(0)
+
+  return (
+    <div>
+      <SecLabel>Who can see my personal info</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <Row icon={<Eye size={17} color="#fff" />} iconBg="#128C7E" label="Last seen and online" sublabel={WL.find(x => x.v === lastSeen)?.label} right={<SelectInput value={lastSeen} onChange={setLastSeen} options={WL} />} />
+        <Row icon={<ImageIcon size={17} color="#fff" />} iconBg="#0a7aff" label="Profile photo" sublabel={WL.find(x => x.v === photo)?.label} right={<SelectInput value={photo} onChange={setPhoto} options={WL} />} />
+        <Row icon={<Info size={17} color="#fff" />} iconBg="#8b5cf6" label="About" sublabel={WL.find(x => x.v === about)?.label} right={<SelectInput value={about} onChange={setAbout} options={WL} />} />
+        <Row icon={<Globe size={17} color="#fff" />} iconBg="#f59e0b" label="Status" sublabel={WLC.find(x => x.v === status)?.label} right={<SelectInput value={status} onChange={setStatus} options={WLC} />} last />
+      </div>
+
+      <SecLabel>Messages</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <Row icon={<Check size={17} color="#fff" />} iconBg="#25D366" label="Read receipts"
+          sublabel={readReceipts ? "People can see when you've read their messages" : 'Read receipts hidden (does not apply in groups)'}
+          right={<Toggle on={readReceipts} onChange={() => setReadReceipts(v => !v)} />} />
+        <Row icon={<Timer size={17} color="#fff" />} iconBg="#06b6d4" label="Default message timer"
+          sublabel={TL.find(x => x.v === msgTimer)?.label}
+          right={<SelectInput value={msgTimer} onChange={setMsgTimer} options={TL} />} last />
+      </div>
+
+      <SecLabel>Disappearing Messages</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <Row icon={<Timer size={17} color="#fff" />} iconBg="#128C7E" label="Default timer"
+          sublabel={disappearing === 'off' ? 'New chats will not use disappearing messages' : `New chats will auto-delete after ${TL.find(x => x.v === disappearing)?.label}`}
+          right={<SelectInput value={disappearing} onChange={setDisappearing} options={TL} />} last />
+      </div>
+
+      <SecLabel>Contacts</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <Row icon={<Ban size={17} color="#fff" />} iconBg={WA.red} label="Blocked contacts" sublabel={blocked === 0 ? 'No blocked contacts' : `${blocked} blocked`} onClick={() => {}} last />
+      </div>
+    </div>
+  )
+}
+
+// ─── Section: Chats ──────────────────────────────────────────────
+function ChatsSection() {
+  const { theme, setTheme } = useApp()
+  const WALLPAPERS = ['#0b141a', '#1a1a2e', '#0d1b2a', '#1b2838', '#162032', '#0f2027', '#1a1a1a', '#0a0f1e']
+  const [wallpaper, setWallpaper] = useState(() => localStorage.getItem('wa_wallpaper') || '#0b141a')
+  const [enterToSend, setEnterToSend] = useState(() => localStorage.getItem('wa_enter_send') !== 'false')
+  const [mediaVisible, setMediaVisible] = useState(() => localStorage.getItem('wa_media_vis') !== 'false')
+
+  const saveWallpaper = (c) => { setWallpaper(c); localStorage.setItem('wa_wallpaper', c) }
+  const saveEnter = () => { const v = !enterToSend; setEnterToSend(v); localStorage.setItem('wa_enter_send', String(v)) }
+  const saveMedia = () => { const v = !mediaVisible; setMediaVisible(v); localStorage.setItem('wa_media_vis', String(v)) }
+
+  return (
+    <div>
+      <SecLabel>Appearance</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <Row
+          icon={theme === 'dark' ? <Moon size={17} color="#fff" /> : <Sun size={17} color="#fff" />}
+          iconBg="#8b5cf6"
+          label="Theme"
+          sublabel={theme === 'dark' ? 'Dark' : 'Light'}
+          right={
+            <div style={{ display: 'flex', gap: 6 }}>
+              {[{ v: 'dark', label: '🌙 Dark' }, { v: 'light', label: '☀️ Light' }].map(t => (
+                <button key={t.v} onClick={e => { e.stopPropagation(); setTheme(t.v) }}
+                  style={{ padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none', background: theme === t.v ? WA.green : WA.border, color: theme === t.v ? '#111b21' : WA.sub }}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          }
+        />
+        <Row icon={<ImageIcon size={17} color="#fff" />} iconBg="#06b6d4" label="Chat wallpaper" sublabel="Background colour for chats"
+          right={
+            <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+              {WALLPAPERS.map(c => (
+                <button key={c} onClick={e => { e.stopPropagation(); saveWallpaper(c) }}
+                  style={{ width: 22, height: 22, borderRadius: '50%', background: c, border: `2px solid ${wallpaper === c ? WA.green : WA.border}`, cursor: 'pointer', padding: 0 }} />
+              ))}
+            </div>
+          }
+          last
+        />
+      </div>
+
+      <SecLabel>Chat Settings</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <Row icon={<Send size={17} color="#fff" />} iconBg="#25D366" label="Enter to send"
+          sublabel={enterToSend ? 'Press Enter to send a message' : 'Press Enter for new line'}
+          right={<Toggle on={enterToSend} onChange={saveEnter} />}
+        />
+        <Row icon={<ImageIcon size={17} color="#fff" />} iconBg="#f59e0b" label="Media visibility"
+          sublabel={mediaVisible ? 'Media saved to gallery automatically' : 'Media not saved to gallery'}
+          right={<Toggle on={mediaVisible} onChange={saveMedia} />}
+        />
+        <Row icon={<Archive size={17} color="#fff" />} iconBg="#3b4a54" label="Archive all chats" sublabel="Hide all chats from the main list" onClick={() => {}} last />
+      </div>
+    </div>
+  )
+}
+
+// ─── Section: Notifications ──────────────────────────────────────
+function NotificationsSection() {
+  const [perm, setPerm] = useState(() => typeof Notification !== 'undefined' ? Notification.permission : 'denied')
+  const [msgs, setMsgs] = useState(true)
+  const [groups, setGroups] = useState(true)
+  const [sounds, setSounds] = useState(true)
+  const [desktop, setDesktop] = useState(perm === 'granted')
+  const [preview, setPreview] = useState(true)
+  const [reactions, setReactions] = useState(true)
+
+  const requestDesktop = async () => {
+    if (typeof Notification === 'undefined') return
+    const p = await Notification.requestPermission()
+    setPerm(p); setDesktop(p === 'granted')
+  }
+
+  return (
+    <div>
+      <SecLabel>Message notifications</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <Row icon={<Bell size={17} color="#fff" />} iconBg="#25D366" label="Message notifications" sublabel={msgs ? 'On' : 'Off'} right={<Toggle on={msgs} onChange={() => setMsgs(v => !v)} />} />
+        <Row icon={<Volume2 size={17} color="#fff" />} iconBg="#06b6d4" label="Sounds" sublabel={sounds ? 'On' : 'Off'} right={<Toggle on={sounds} onChange={() => setSounds(v => !v)} />} />
+        <Row icon={<Eye size={17} color="#fff" />} iconBg="#8b5cf6" label="Show preview" sublabel={preview ? 'Message content shown in notification' : 'Content hidden'} right={<Toggle on={preview} onChange={() => setPreview(v => !v)} />} last />
+      </div>
+
+      <SecLabel>Group notifications</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <Row icon={<Bell size={17} color="#fff" />} iconBg="#0a7aff" label="Group notifications" sublabel={groups ? 'On' : 'Off'} right={<Toggle on={groups} onChange={() => setGroups(v => !v)} />} />
+        <Row icon={<Check size={17} color="#fff" />} iconBg="#f59e0b" label="Reaction notifications" sublabel={reactions ? 'On' : 'Off'} right={<Toggle on={reactions} onChange={() => setReactions(v => !v)} />} last />
+      </div>
+
+      <SecLabel>Desktop notifications</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <Row icon={<Monitor size={17} color="#fff" />} iconBg="#128C7E"
+          label="Desktop notifications"
+          sublabel={perm === 'granted' ? 'Enabled by browser' : perm === 'denied' ? 'Blocked by browser — check browser settings' : 'Click to enable'}
+          right={
+            perm === 'granted'
+              ? <Toggle on={desktop} onChange={() => setDesktop(v => !v)} />
+              : <button onClick={requestDesktop} style={{ padding: '5px 12px', borderRadius: 8, background: WA.green, color: '#111b21', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Enable</button>
+          }
+          last
+        />
+      </div>
+    </div>
+  )
+}
+
+// ─── Section: Keyboard Shortcuts ─────────────────────────────────
+function ShortcutsSection() {
+  const groups = [
+    {
+      label: 'Chats',
+      items: [
+        ['Ctrl + N', 'New chat'],
+        ['Ctrl + Shift + ]', 'Next chat'],
+        ['Ctrl + Shift + [', 'Previous chat'],
+        ['Ctrl + F', 'Search in chat'],
+        ['Ctrl + Shift + F', 'Search all chats'],
+      ],
+    },
+    {
+      label: 'Chat actions',
+      items: [
+        ['Ctrl + E', 'Archive chat'],
+        ['Ctrl + Shift + M', 'Mute / Unmute chat'],
+        ['Ctrl + Backspace', 'Delete chat'],
+        ['Ctrl + Shift + U', 'Mark as unread'],
+        ['Ctrl + Shift + E', 'Archive all chats'],
+      ],
+    },
+    {
+      label: 'Messages',
+      items: [
+        ['Ctrl + C', 'Copy selected message'],
+        ['Enter', 'Send message'],
+        ['Shift + Enter', 'New line in message'],
+        ['Esc', 'Close chat / panel'],
+      ],
+    },
+    {
+      label: 'General',
+      items: [
+        ['Ctrl + /', 'View keyboard shortcuts'],
+        ['Ctrl + P', 'Open profile settings'],
+        ['Ctrl + ,', 'Open settings'],
+      ],
+    },
+  ]
+  return (
+    <div style={{ padding: '8px 20px 24px' }}>
+      <div style={{ fontSize: 13, color: WA.sub, marginBottom: 20, lineHeight: 1.6 }}>
+        Use these keyboard shortcuts to navigate and interact faster in WhatsApp.
+      </div>
+      {groups.map(g => (
+        <div key={g.label} style={{ marginBottom: 24 }}>
+          <div style={{ fontSize: 12, color: WA.green, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 10 }}>{g.label}</div>
+          <div style={{ background: WA.row, borderRadius: 12, border: `1px solid ${WA.border}`, overflow: 'hidden' }}>
+            {g.items.map(([shortcut, action], i) => (
+              <div key={shortcut} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: i < g.items.length - 1 ? `1px solid ${WA.border}` : 'none' }}>
+                <span style={{ fontSize: 14, color: WA.text }}>{action}</span>
+                <kbd style={{ fontFamily: 'monospace', fontSize: 12, color: WA.sub, background: '#2a3942', padding: '3px 8px', borderRadius: 6, border: `1px solid ${WA.border}` }}>{shortcut}</kbd>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ─── Section: Help ───────────────────────────────────────────────
+function HelpSection() {
+  const items = [
+    { icon: <HelpCircle size={17} color="#fff" />, bg: '#0a7aff', label: 'Help Centre', sub: 'Get answers to common questions', href: 'https://faq.whatsapp.com' },
+    { icon: <Send size={17} color="#fff" />, bg: '#25D366', label: 'Contact us', sub: 'Report a problem or send feedback', href: null },
+    { icon: <Globe size={17} color="#fff" />, bg: '#8b5cf6', label: 'Terms and Privacy Policy', sub: 'Read our terms of service', href: 'https://www.whatsapp.com/legal/privacy-policy' },
+    { icon: <Info size={17} color="#fff" />, bg: '#f59e0b', label: 'Send feedback', sub: 'Help us improve this app', href: null },
+  ]
+  return (
+    <div>
+      <SecLabel>Support</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        {items.map((item, i) => (
+          <Row key={item.label} icon={item.icon} iconBg={item.bg} label={item.label} sublabel={item.sub}
+            onClick={() => item.href && window.open(item.href, '_blank')}
+            last={i === items.length - 1}
+          />
+        ))}
+      </div>
+
+      <SecLabel>App Info</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <Row icon={<Info size={17} color="#fff" />} iconBg="#3b4a54" label="App version" right={<span style={{ fontFamily: 'monospace', fontSize: 13 }}>v{import.meta.env.VITE_APP_VERSION || '1.0.0'}</span>} />
+        <Row icon={<Globe size={17} color="#fff" />} iconBg="#3b4a54" label="Backend API" right={<span style={{ fontFamily: 'monospace', fontSize: 12 }}>{(import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace('/api/v1', '')}</span>} />
+        <Row icon={<Database size={17} color="#fff" />} iconBg="#3b4a54" label="Environment" right={<span style={{ fontFamily: 'monospace', fontSize: 12 }}>{import.meta.env.VITE_APP_ENV || 'development'}</span>} last />
+      </div>
+    </div>
+  )
+}
+
+// ─── Nav item (needs own state for hover) ───────────────────────
+function NavItem({ n, active, isMobile, onClick }) {
+  const [h, setH] = useState(false)
+  const Icon = n.icon
+  const isActive = active === n.id && !isMobile
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setH(true)}
+      onMouseLeave={() => setH(false)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 14, padding: '13px 20px',
+        cursor: 'pointer',
+        background: isActive ? 'rgba(37,211,102,.08)' : h ? 'rgba(255,255,255,.04)' : 'transparent',
+        borderLeft: isActive ? `3px solid ${WA.green}` : '3px solid transparent',
+        borderBottom: `1px solid ${WA.border}`,
+        transition: 'background .12s',
+      }}
+    >
+      <div style={{ width: 38, height: 38, borderRadius: '50%', background: n.color + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <Icon size={18} color={n.color} />
+      </div>
+      <span style={{ fontSize: 15, color: isActive ? WA.green : WA.text, fontWeight: isActive ? 600 : 400, flex: 1 }}>{n.label}</span>
+      {isMobile && <ChevronRight size={15} style={{ color: '#3b4a54' }} />}
+    </div>
+  )
+}
+
+// ─── Nav sections config ─────────────────────────────────────────
+const NAV = [
+  { id: 'profile',       icon: UserCircle,    label: 'Profile',            color: '#128C7E' },
+  { id: 'account',       icon: Shield,        label: 'Account',            color: '#0a7aff' },
+  { id: 'privacy',       icon: Lock,          label: 'Privacy',            color: '#6366f1' },
+  { id: 'chats',         icon: MessageSquare, label: 'Chats',              color: '#f59e0b' },
+  { id: 'notifications', icon: Bell,          label: 'Notifications',      color: '#25D366' },
+  { id: 'shortcuts',     icon: Keyboard,      label: 'Keyboard shortcuts', color: '#8b5cf6' },
+  { id: 'help',          icon: HelpCircle,    label: 'Help',               color: '#06b6d4' },
+]
+
+const SECTION_COMPONENTS = {
+  profile: ProfileSection,
+  account: AccountSection,
+  privacy: PrivacySection,
+  chats: ChatsSection,
+  notifications: NotificationsSection,
+  shortcuts: ShortcutsSection,
+  help: HelpSection,
+}
+
+// ─── Main Settings Component ─────────────────────────────────────
+export default function Settings() {
+  const { refreshSessionStatus } = useApp()
+  const navigate = useNavigate()
+  const [active, setActive] = useState('profile')
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768)
+  const [mobileShowDetail, setMobileShowDetail] = useState(false)
+
+  useEffect(() => {
+    const h = () => setIsMobile(window.innerWidth <= 768)
+    window.addEventListener('resize', h)
+    return () => window.removeEventListener('resize', h)
+  }, [])
+
+  const selectSection = (id) => {
+    setActive(id)
+    if (isMobile) setMobileShowDetail(true)
+  }
+
+  const handleLogout = async () => {
+    try {
+      await whatsappApi.disconnect()
+      await refreshSessionStatus()
+    } catch { }
+    navigate('/login')
+  }
+
+  const SectionContent = SECTION_COMPONENTS[active]
+  const activeNav = NAV.find(n => n.id === active)
+
+  // ── Left nav panel ──
+  const LeftPanel = (
+    <div style={{ width: isMobile ? '100%' : 280, flexShrink: 0, background: WA.bg, display: 'flex', flexDirection: 'column', borderRight: `1px solid ${WA.border}`, height: '100%', overflowY: 'auto' }}>
+      {/* Header */}
+      <div style={{ padding: '16px 20px', background: WA.panel, borderBottom: `1px solid ${WA.border}`, position: 'sticky', top: 0, zIndex: 2 }}>
+        <span style={{ fontSize: 19, fontWeight: 700, color: WA.text }}>Settings</span>
+      </div>
+
+      {/* Nav items */}
+      <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 8 }}>
+        {NAV.map(n => (
+          <NavItem key={n.id} n={n} active={active} isMobile={isMobile} onClick={() => selectSection(n.id)} />
+        ))}
+      </div>
+
+      {/* Log out */}
+      <div style={{ borderTop: `1px solid ${WA.border}`, padding: '8px 0' }}>
+        <div
+          onClick={handleLogout}
+          style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '13px 20px', cursor: 'pointer' }}
+          onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,77,79,.08)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+        >
+          <div style={{ width: 38, height: 38, borderRadius: '50%', background: 'rgba(255,77,79,.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <LogOut size={18} color={WA.red} />
+          </div>
+          <span style={{ fontSize: 15, color: WA.red }}>Log out</span>
+        </div>
+      </div>
+    </div>
+  )
+
+  // ── Right detail panel ──
+  const RightPanel = (
+    <div style={{ flex: 1, background: WA.bg, display: 'flex', flexDirection: 'column', overflowY: 'auto', minWidth: 0 }}>
+      <PanelHeader
+        title={activeNav?.label}
+        onBack={isMobile ? () => setMobileShowDetail(false) : undefined}
+      />
+      <div style={{ overflowY: 'auto', flex: 1 }}>
+        {SectionContent && <SectionContent />}
+      </div>
+    </div>
+  )
+
+  // ── Outer wrapper ──
+  return (
+    <div style={{ height: 'calc(100vh - 120px)', display: 'flex', borderRadius: 12, overflow: 'hidden', border: `1px solid ${WA.border}`, background: WA.bg }}>
+      {isMobile ? (
+        mobileShowDetail ? RightPanel : LeftPanel
+      ) : (
+        <>
+          {LeftPanel}
+          {RightPanel}
+        </>
+      )}
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )

@@ -1,7 +1,7 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, Link } from 'react-router-dom'
 import {
   LayoutDashboard, Zap, Users, MessageSquare,
-  ScrollText, Settings, MessageCircle, Send
+  ScrollText, Settings, MessageCircle, Send, X, Radio
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { whatsappApi } from '../../services/api'
@@ -12,6 +12,7 @@ const navItems = [
   { to: '/automations', icon: Zap, label: 'Automations' },
   { to: '/contacts', icon: Users, label: 'Contacts' },
   { to: '/messages', icon: MessageSquare, label: 'Messages' },
+  { to: '/status', icon: Radio, label: 'Status' },
   { to: '/campaigns', icon: Send, label: 'Campaigns' },
   { to: '/logs', icon: ScrollText, label: 'Logs' },
 ]
@@ -20,8 +21,9 @@ const bottomNavItems = [
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen, isCollapsed, onClose }) {
   const { profile } = useApp()
+  const { pathname } = useLocation()
   const [sessionStatus, setSessionStatus] = useState({ status: 'disconnected', phone: null })
 
   useEffect(() => {
@@ -45,16 +47,28 @@ export default function Sidebar() {
   }[sessionStatus.status] || 'disconnected'
 
   return (
-    <aside className="sidebar">
-      {/* Logo */}
-      <div className="sidebar-logo">
-        <div className="sidebar-logo-icon">
-          <MessageCircle size={20} color="white" />
-        </div>
-        <div className="sidebar-logo-text">
-          WA Automate
-          <span>Automation Platform</span>
-        </div>
+    <aside className={`sidebar${isOpen ? ' sidebar-open' : ''}${isCollapsed ? ' sidebar-collapsed' : ''}`}>
+      {/* Logo + close button on mobile */}
+      <div className="sidebar-logo" style={pathname === '/dashboard' ? { justifyContent: 'flex-end', borderBottom: 'none' } : undefined}>
+        {pathname !== '/dashboard' && (
+          <>
+            <div className="sidebar-logo-icon">
+              <MessageCircle size={20} color="white" />
+            </div>
+            <div className="sidebar-logo-text">
+              WA Automate
+              <span>Automation Platform</span>
+            </div>
+          </>
+        )}
+        {/* Mobile close button */}
+        <button
+          className="sidebar-close-btn"
+          onClick={onClose}
+          aria-label="Close menu"
+        >
+          <X size={20} />
+        </button>
       </div>
 
       {/* Navigation */}
@@ -62,12 +76,14 @@ export default function Sidebar() {
         <div className="nav-section">
           <div className="nav-section-label">Main Menu</div>
           {navItems.map(({ to, icon: Icon, label }) => {
-            const isDisabled = !profile?.isProfileConfigured
+            const isDisabled = false
             return (
               <NavLink
                 key={to}
                 to={to}
-                onClick={(e) => isDisabled && e.preventDefault()}
+                onClick={() => {
+                  onClose && onClose()
+                }}
                 className={({ isActive }) => `nav-item${isActive ? ' active' : ''}${isDisabled ? ' disabled' : ''}`}
                 style={isDisabled ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
                 title={isDisabled ? 'Complete profile details first' : undefined}
@@ -85,6 +101,7 @@ export default function Sidebar() {
             <NavLink
               key={to}
               to={to}
+              onClick={() => onClose && onClose()}
               className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
             >
               <Icon size={18} className="nav-item-icon" />
@@ -94,21 +111,52 @@ export default function Sidebar() {
         </div>
       </nav>
 
-      {/* WhatsApp Status */}
+      {/* User Profile Card instead of plain WhatsApp status */}
       <div className="sidebar-footer">
-        <div className="sidebar-status">
-          <span className={`status-dot ${statusColor}`}></span>
-          <div className="status-info">
-            <div className="status-label">WhatsApp</div>
-            <div className="status-value">
-              {sessionStatus.status === 'connected'
-                ? sessionStatus.phone || 'Connected'
-                : sessionStatus.status === 'connecting'
-                ? 'Connecting...'
-                : 'Disconnected'}
+        <Link 
+          to="/settings" 
+          onClick={() => onClose && onClose()} 
+          style={{ display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none', color: 'inherit' }}
+        >
+          <div style={{ position: 'relative', display: 'flex', flexShrink: 0 }}>
+            <div style={{
+              width: 36,
+              height: 36,
+              borderRadius: '50%',
+              background: 'var(--gradient-purple)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 14,
+              fontWeight: 700,
+              color: 'white',
+              boxShadow: 'var(--shadow-glow-purple)'
+            }}>
+              {profile.name ? profile.name.charAt(0).toUpperCase() : 'U'}
+            </div>
+            {/* WhatsApp Status Dot indicator */}
+            <span 
+              className={`status-dot ${statusColor}`} 
+              style={{ 
+                position: 'absolute', 
+                bottom: -2, 
+                right: -2, 
+                width: 12, 
+                height: 12, 
+                border: '2px solid #0d1421', 
+                borderRadius: '50%'
+              }} 
+            />
+          </div>
+          <div className="status-info" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div className="status-value" style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {profile.name || 'User Profile'}
+            </div>
+            <div className="status-label" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {profile.role || 'Administrator'}
             </div>
           </div>
-        </div>
+        </Link>
       </div>
     </aside>
   )

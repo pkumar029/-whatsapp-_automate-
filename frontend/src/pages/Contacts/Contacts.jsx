@@ -1,10 +1,18 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Users, Plus, Search, Edit2, Trash2, Phone, X, Check, RefreshCw, WifiOff, Megaphone, User } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Users, Plus, Search, Edit2, Trash2, Phone, X, Check, RefreshCw, WifiOff, Megaphone, User, EyeOff, Eye, Download, Upload, Mail } from 'lucide-react'
 import { contactsApi, whatsappApi } from '../../services/api'
 import { Link } from 'react-router-dom'
 import { formatISTDate } from '../../utils/date'
 import { getErrorMessage } from '../../utils/error'
 
+// Returns true only for contacts auto-created by the inbound webhook
+// (not saved by user, created when an unknown number messages us)
+function isAutoContact(c) {
+  const name = (c.name || '').trim()
+  if (/^WhatsApp User/i.test(name)) return true
+  if (/^Unnamed Broadcast/i.test(name)) return true
+  return false
+}
 
 // ─── Contact Form Modal ───────────────────────────────────────
 function ContactModal({ contact, onClose, onSave }) {
@@ -88,37 +96,32 @@ export default function Contacts() {
   const [showModal, setShowModal] = useState(false)
   const [editContact, setEditContact] = useState(null)
   const [deleteId, setDeleteId] = useState(null)
-  
+  const [showAutoContacts, setShowAutoContacts] = useState(false)
+  const [profilePics, setProfilePics] = useState({}) // contactId → url | null
+
   // Sync states
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
 
+  // Import/Export
+  const [importing, setImporting] = useState(false)
+  const [importMsg, setImportMsg]  = useState('')
+  const importInputRef = useRef(null)
+
   // Filter states
   const [filterType, setFilterType] = useState('all')
-
-  const counts = {
-    all: contacts.length,
-    individual: contacts.filter(c => !c.tags?.includes('Group') && !c.tags?.includes('Team')).length,
-    group: contacts.filter(c => c.tags?.includes('Group')).length,
-    team: contacts.filter(c => c.tags?.includes('Team')).length,
-  }
-
-  const filteredContacts = contacts.filter(c => {
-    const isGroup = c.tags?.includes('Group')
-    const isTeam = c.tags?.includes('Team')
-    const type = isGroup ? 'group' : (isTeam ? 'team' : 'individual')
-    if (filterType === 'all') return true
-    return type === filterType
-  })
 
   // WhatsApp connection states
   const [sessionStatus, setSessionStatus] = useState({ status: 'disconnected' })
   const [loadingSession, setLoadingSession] = useState(true)
 
   useEffect(() => {
-    whatsappApi.getStatus().then(res => {
+    whatsappApi.getStatus().then(async res => {
       setSessionStatus(res.data)
       setLoadingSession(false)
+      if (res.data?.status === 'connected') {
+        try { await contactsApi.sync() } catch {}
+      }
     }).catch(() => {
       setSessionStatus({ status: 'disconnected' })
       setLoadingSession(false)
@@ -128,7 +131,7 @@ export default function Contacts() {
   const fetchContacts = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await contactsApi.getAll({ search, page: 1, limit: 100 })
+      const res = await contactsApi.getAll({ search, page: 1, limit: 500 })
       setContacts(res.data?.contacts || res.data || [])
     } catch {
       setContacts([])
@@ -137,17 +140,39 @@ export default function Contacts() {
     }
   }, [search])
 
+  // Lazily fetch profile pics for the first 20 individual (non-group) contacts
+  const fetchBatchProfilePics = useCallback(async (contactList) => {
+    const toFetch = contactList
+      .filter(c => !c.tags?.includes('Group') && !c.tags?.includes('Team'))
+      .filter(c => profilePics[c.id] === undefined)
+      .slice(0, 20)
+    if (toFetch.length === 0) return
+    const results = await Promise.allSettled(
+      toFetch.map(c => contactsApi.getProfilePic(c.id).then(r => ({ id: c.id, url: r.data?.url || null })))
+    )
+    const update = {}
+    results.forEach(r => { if (r.status === 'fulfilled') update[r.value.id] = r.value.url })
+    setProfilePics(prev => ({ ...prev, ...update }))
+  }, [profilePics])
+
   useEffect(() => {
     const timer = setTimeout(fetchContacts, 300)
     return () => clearTimeout(timer)
   }, [fetchContacts])
+
+  // After contacts load, fetch profile pics for visible contacts
+  useEffect(() => {
+    if (contacts.length > 0 && sessionStatus.status === 'connected') {
+      fetchBatchProfilePics(contacts)
+    }
+  }, [contacts, sessionStatus.status])
 
   const handleDelete = async (id) => {
     try {
       await contactsApi.delete(id)
       setDeleteId(null)
       fetchContacts()
-    } catch { }
+    } catch {}
   }
 
   const handleSync = async () => {
@@ -168,10 +193,58 @@ export default function Contacts() {
   const openEdit = (contact) => { setEditContact(contact); setShowModal(true) }
   const openAdd = () => { setEditContact(null); setShowModal(true) }
 
+  const handleExport = async () => {
+    try {
+      const res = await contactsApi.exportCsv()
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }))
+      const a = document.createElement('a')
+      a.href = url; a.download = `contacts_${new Date().toISOString().slice(0,10)}.csv`
+      a.click(); URL.revokeObjectURL(url)
+    } catch { alert('Export failed.') }
+  }
+
+  const handleImport = async (e) => {
+    const file = e.target.files?.[0]; if (!file) return
+    e.target.value = null
+    setImporting(true); setImportMsg('')
+    try {
+      const res = await contactsApi.importCsv(file)
+      setImportMsg(res.data?.message || 'Import complete.')
+      fetchContacts()
+    } catch (err) {
+      setImportMsg(getErrorMessage(err, 'Import failed.'))
+    } finally {
+      setImporting(false)
+      setTimeout(() => setImportMsg(''), 8000)
+    }
+  }
+
+  // Split contacts into real vs auto-created
+  const realContacts = contacts.filter(c => !isAutoContact(c))
+  const autoContacts = contacts.filter(c => isAutoContact(c))
+
+  // Apply type filter on real contacts (or all if toggle is on)
+  const baseContacts = showAutoContacts ? contacts : realContacts
+
+  const counts = {
+    all: baseContacts.length,
+    individual: baseContacts.filter(c => !c.tags?.includes('Group') && !c.tags?.includes('Team')).length,
+    group: baseContacts.filter(c => c.tags?.includes('Group')).length,
+    team: baseContacts.filter(c => c.tags?.includes('Team')).length,
+  }
+
+  const filteredContacts = baseContacts.filter(c => {
+    const isGroup = c.tags?.includes('Group')
+    const isTeam = c.tags?.includes('Team')
+    const type = isGroup ? 'group' : (isTeam ? 'team' : 'individual')
+    if (filterType !== 'all' && type !== filterType) return false
+    return true
+  })
+
   if (loadingSession) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 'calc(100vh - 120px)', color: 'var(--text-muted)' }}>
-        <RefreshCw className="animate-spin" size={24} style={{ marginRight: 8, animation: 'spin 1s linear infinite' }} /> Loading connection state...
+        <RefreshCw size={24} style={{ marginRight: 8, animation: 'spin 1s linear infinite' }} /> Loading...
       </div>
     )
   }
@@ -185,16 +258,13 @@ export default function Contacts() {
             <p className="page-subtitle">Manage your WhatsApp audience</p>
           </div>
         </div>
-        
         <div className="card empty-state" style={{ padding: '60px 20px', textAlign: 'center', marginTop: 20 }}>
           <WifiOff size={48} style={{ margin: '0 auto 16px', color: 'var(--accent-rose)' }} />
           <h3>WhatsApp Connection Required</h3>
           <p style={{ maxWidth: 420, margin: '8px auto 20px', fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-            To view, sync, or manage your contacts list, please connect your WhatsApp account. Linking your device allows the system to securely sync your contacts from the database.
+            Connect your WhatsApp account to sync and manage contacts.
           </p>
-          <Link to="/settings" className="btn btn-primary">
-            Go to Settings & Connect
-          </Link>
+          <Link to="/settings" className="btn btn-primary">Go to Settings &amp; Connect</Link>
         </div>
       </div>
     )
@@ -205,12 +275,30 @@ export default function Contacts() {
       <div className="page-header">
         <div>
           <h2 className="page-title">Contacts</h2>
-          <p className="page-subtitle">{contacts.length} contacts total</p>
+          <p className="page-subtitle">{counts.all} contacts{autoContacts.length > 0 && !showAutoContacts ? ` · ${autoContacts.length} auto-created hidden` : ''}</p>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {autoContacts.length > 0 && (
+            <button
+              className="btn btn-ghost"
+              onClick={() => setShowAutoContacts(v => !v)}
+              title={showAutoContacts ? 'Hide auto-created contacts' : `Show ${autoContacts.length} auto-created contacts`}
+              style={{ fontSize: 'var(--font-size-xs)', gap: 6 }}
+            >
+              {showAutoContacts ? <EyeOff size={15} /> : <Eye size={15} />}
+              {showAutoContacts ? 'Hide system' : `+${autoContacts.length} system`}
+            </button>
+          )}
+          <button className="btn btn-ghost" onClick={handleExport} title="Export contacts as CSV">
+            <Download size={15} /> Export CSV
+          </button>
+          <button className="btn btn-ghost" onClick={() => importInputRef.current?.click()} disabled={importing} title="Import contacts from CSV">
+            <Upload size={15} /> {importing ? 'Importing…' : 'Import CSV'}
+          </button>
+          <input ref={importInputRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={handleImport} />
           <button className="btn btn-secondary" onClick={handleSync} disabled={syncing}>
             <RefreshCw size={16} style={{ animation: syncing ? 'spin 1s linear infinite' : 'none', marginRight: 6 }} />
-            {syncing ? 'Syncing...' : 'Sync WhatsApp Contacts'}
+            {syncing ? 'Syncing...' : 'Sync WhatsApp'}
           </button>
           <button className="btn btn-primary" onClick={openAdd}>
             <Plus size={16} /> Add Contact
@@ -219,8 +307,13 @@ export default function Contacts() {
       </div>
 
       {syncMessage && (
-        <div style={{ background: 'var(--accent-primary-muted)', border: '1px solid rgba(37,211,102,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 14px', marginBottom: 16, fontSize: 'var(--font-size-sm)', color: 'var(--accent-primary)' }}>
+        <div style={{ background: 'var(--accent-primary-muted)', border: '1px solid rgba(37,211,102,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 14px', marginBottom: 12, fontSize: 'var(--font-size-sm)', color: 'var(--accent-primary)' }}>
           {syncMessage}
+        </div>
+      )}
+      {importMsg && (
+        <div style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 14px', marginBottom: 12, fontSize: 'var(--font-size-sm)', color: '#a5b4fc', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Upload size={14} /> {importMsg}
         </div>
       )}
 
@@ -237,44 +330,30 @@ export default function Contacts() {
                 style={{ paddingLeft: 38 }}
               />
             </div>
-            
+
             <div style={{ display: 'flex', gap: 4, background: 'rgba(255,255,255,0.05)', padding: 3, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
-              <button 
-                onClick={() => setFilterType('all')} 
-                className={`btn btn-sm ${filterType === 'all' ? 'btn-primary' : 'btn-ghost'}`}
-                style={{ borderRadius: '4px', fontSize: 12, padding: '4px 10px', height: 'auto' }}
-              >
-                All ({counts.all})
-              </button>
-              <button 
-                onClick={() => setFilterType('individual')} 
-                className={`btn btn-sm ${filterType === 'individual' ? 'btn-primary' : 'btn-ghost'}`}
-                style={{ borderRadius: '4px', fontSize: 12, padding: '4px 10px', height: 'auto' }}
-              >
-                Individuals ({counts.individual})
-              </button>
-              <button 
-                onClick={() => setFilterType('group')} 
-                className={`btn btn-sm ${filterType === 'group' ? 'btn-primary' : 'btn-ghost'}`}
-                style={{ borderRadius: '4px', fontSize: 12, padding: '4px 10px', height: 'auto' }}
-              >
-                Groups ({counts.group})
-              </button>
-              {counts.team > 0 && (
-                <button 
-                  onClick={() => setFilterType('team')} 
-                  className={`btn btn-sm ${filterType === 'team' ? 'btn-primary' : 'btn-ghost'}`}
+              {[
+                { id: 'all', label: `All (${counts.all})` },
+                { id: 'individual', label: `Individuals (${counts.individual})` },
+                { id: 'group', label: `Groups (${counts.group})` },
+                ...(counts.team > 0 ? [{ id: 'team', label: `Teams (${counts.team})` }] : []),
+              ].map(({ id, label }) => (
+                <button
+                  key={id}
+                  onClick={() => setFilterType(id)}
+                  className={`btn btn-sm ${filterType === id ? 'btn-primary' : 'btn-ghost'}`}
                   style={{ borderRadius: '4px', fontSize: 12, padding: '4px 10px', height: 'auto' }}
                 >
-                  Teams ({counts.team})
+                  {label}
                 </button>
-              )}
+              ))}
             </div>
           </div>
           <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)', fontWeight: 500 }}>
             {filteredContacts.length} results
           </div>
         </div>
+
         {loading ? (
           <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)' }}>Loading contacts...</div>
         ) : filteredContacts.length === 0 ? (
@@ -282,9 +361,9 @@ export default function Contacts() {
             <div className="empty-state-icon"><Users size={28} /></div>
             <div className="empty-state-title">No contacts found</div>
             <div className="empty-state-desc">
-              {contacts.length === 0 
-                ? "Add or Sync your WhatsApp contacts to get started" 
-                : `No contacts found matching the "${filterType}" filter.`}
+              {contacts.length === 0
+                ? 'Add or Sync your WhatsApp contacts to get started'
+                : `No contacts match the current filter.`}
             </div>
             {contacts.length === 0 && (
               <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
@@ -311,45 +390,39 @@ export default function Contacts() {
               {filteredContacts.map(c => {
                 const isGroup = c.tags?.includes('Group')
                 const isTeam = c.tags?.includes('Team')
-                
-                let avatarContent
-                if (isGroup) {
-                  avatarContent = <Users size={16} />
-                } else if (isTeam) {
-                  avatarContent = <Megaphone size={16} />
-                } else {
-                  avatarContent = c.name?.[0]?.toUpperCase() || <User size={16} />
-                }
+                const isAuto = isAutoContact(c)
+
+                const picUrl = !isGroup && !isTeam ? (profilePics[c.id] || null) : null
 
                 let badgeClass = 'badge-green'
                 let badgeLabel = 'Individual'
-                if (isGroup) {
-                  badgeClass = 'badge-indigo'
-                  badgeLabel = 'Group'
-                } else if (isTeam) {
-                  badgeClass = 'badge-teal'
-                  badgeLabel = 'Team'
-                }
+                if (isGroup) { badgeClass = 'badge-indigo'; badgeLabel = 'Group' }
+                else if (isTeam) { badgeClass = 'badge-teal'; badgeLabel = 'Team' }
 
                 return (
-                  <tr key={c.id}>
+                  <tr key={c.id} style={{ opacity: isAuto ? 0.65 : 1 }}>
                     <td className="td-primary" style={{ display: 'flex', alignItems: 'center', gap: 10, borderTop: 'none' }}>
-                      <div style={{ 
-                        width: 34, 
-                        height: 34, 
-                        borderRadius: '50%', 
-                        background: isGroup ? 'rgba(99, 102, 241, 0.15)' : (isTeam ? 'rgba(45, 212, 191, 0.15)' : 'var(--accent-primary-muted)'), 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        justifyContent: 'center', 
-                        color: isGroup ? 'rgb(165, 180, 252)' : (isTeam ? 'rgb(153, 246, 228)' : 'var(--accent-primary)'), 
-                        fontWeight: 700, 
-                        fontSize: 13, 
-                        flexShrink: 0 
+                      <div style={{
+                        width: 34, height: 34, borderRadius: '50%',
+                        background: isGroup ? 'rgba(99,102,241,0.15)' : (isTeam ? 'rgba(45,212,191,0.15)' : (picUrl ? 'transparent' : 'var(--accent-primary-muted)')),
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: isGroup ? 'rgb(165,180,252)' : (isTeam ? 'rgb(153,246,228)' : 'var(--accent-primary)'),
+                        fontWeight: 700, fontSize: 13, flexShrink: 0,
+                        overflow: 'hidden'
                       }}>
-                        {avatarContent}
+                        {picUrl
+                          ? <img src={picUrl} alt={c.name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} onError={e => { e.target.style.display = 'none' }} />
+                          : isGroup ? <Users size={16} />
+                          : isTeam ? <Megaphone size={16} />
+                          : (c.name?.[0]?.toUpperCase() || <User size={16} />)
+                        }
                       </div>
-                      <span style={{ fontWeight: (isGroup || isTeam) ? 600 : 500 }}>{c.name}</span>
+                      <div>
+                        <span style={{ fontWeight: (isGroup || isTeam) ? 600 : 500 }}>{c.name}</span>
+                        {isAuto && (
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>auto-created</div>
+                        )}
+                      </div>
                     </td>
                     <td style={{ borderTop: 'none' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'monospace', fontSize: 13 }}>
@@ -357,11 +430,7 @@ export default function Contacts() {
                       </div>
                     </td>
                     <td>{c.email || '—'}</td>
-                    <td>
-                      <span className={`badge ${badgeClass}`}>
-                        {badgeLabel}
-                      </span>
-                    </td>
+                    <td><span className={`badge ${badgeClass}`}>{badgeLabel}</span></td>
                     <td>{c.created_at ? formatISTDate(c.created_at) : '—'}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 6 }}>
@@ -377,7 +446,6 @@ export default function Contacts() {
         )}
       </div>
 
-      {/* Add/Edit Modal */}
       {showModal && (
         <ContactModal
           contact={editContact}
@@ -386,7 +454,6 @@ export default function Contacts() {
         />
       )}
 
-      {/* Delete Confirm */}
       {deleteId && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setDeleteId(null)}>
           <div className="modal" style={{ maxWidth: 360 }}>
@@ -405,18 +472,11 @@ export default function Contacts() {
           </div>
         </div>
       )}
+
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
-        .badge-indigo {
-          background: rgba(99, 102, 241, 0.15) !important;
-          color: rgb(165, 180, 252) !important;
-          border: 1px solid rgba(99, 102, 241, 0.3) !important;
-        }
-        .badge-teal {
-          background: rgba(45, 212, 191, 0.15) !important;
-          color: rgb(153, 246, 228) !important;
-          border: 1px solid rgba(45, 212, 191, 0.3) !important;
-        }
+        .badge-indigo { background: rgba(99,102,241,0.15) !important; color: rgb(165,180,252) !important; border: 1px solid rgba(99,102,241,0.3) !important; }
+        .badge-teal   { background: rgba(45,212,191,0.15) !important; color: rgb(153,246,228) !important; border: 1px solid rgba(45,212,191,0.3) !important; }
       `}</style>
     </div>
   )

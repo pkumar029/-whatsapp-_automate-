@@ -14,19 +14,21 @@ router = APIRouter(prefix="/messages", tags=["Messages"])
 @router.get("", response_model=MessageListResponse)
 async def list_messages(
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=500),
     search: Optional[str] = Query(None),
     direction: Optional[str] = Query(None, pattern="^(inbound|outbound)$"),
     contact_id: Optional[int] = Query(None),
     db: Session = Depends(get_db)
 ):
     """List messages with filtering and pagination."""
+    from models.models import WhatsappSession, SessionStatus
+    session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
+    wa_account = session.phone if session else None
+    
     return messages_service.get_messages(
         db, page=page, limit=limit, search=search,
-        direction=direction, contact_id=contact_id
+        direction=direction, contact_id=contact_id, wa_account=wa_account
     )
-
-
 @router.post("/send", status_code=201)
 async def send_message(data: MessageSend, db: Session = Depends(get_db)):
     """Send a WhatsApp message."""
@@ -43,7 +45,7 @@ async def send_message(data: MessageSend, db: Session = Depends(get_db)):
 async def messages_by_contact(
     contact_id: int,
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
     """Get all messages for a specific contact."""

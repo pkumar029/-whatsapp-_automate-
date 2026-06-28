@@ -1,20 +1,23 @@
-import { useLocation } from 'react-router-dom'
-import { Bell, Search, RefreshCw, Sun, Moon } from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { Bell, RefreshCw, Sun, Moon, Menu } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import { useState, useEffect } from 'react'
 import { whatsappApi } from '../../services/api'
 
 const pageMeta = {
-  '/dashboard': { title: 'Dashboard', subtitle: 'Welcome back — here\'s your automation overview' },
-  '/automations': { title: 'Automations', subtitle: 'Build and manage your WhatsApp automation workflows' },
-  '/contacts': { title: 'Contacts', subtitle: 'Manage your WhatsApp contacts and groups' },
-  '/messages': { title: 'Messages', subtitle: 'View and send WhatsApp messages' },
-  '/logs': { title: 'Execution Logs', subtitle: 'Monitor automation runs and debug errors' },
-  '/settings': { title: 'Settings', subtitle: 'Configure WhatsApp session and application settings' },
+  '/dashboard':   { title: 'Dashboard',       subtitle: 'Your automation overview' },
+  '/automations': { title: 'Automations',     subtitle: 'Build and manage workflows' },
+  '/contacts':    { title: 'Contacts',        subtitle: 'Manage your WhatsApp contacts' },
+  '/messages':    { title: 'Messages',        subtitle: 'View and send WhatsApp messages' },
+  '/campaigns':   { title: 'Campaigns',       subtitle: 'Bulk messaging campaigns' },
+  '/logs':        { title: 'Logs',            subtitle: 'Monitor automation runs' },
+  '/settings':    { title: 'Settings',        subtitle: 'Configure your session' },
+  '/profile':     { title: 'My Profile',      subtitle: 'Manage your account details' },
 }
 
-export default function Header() {
+export default function Header({ onMenuToggle }) {
   const { pathname } = useLocation()
+  const navigate = useNavigate()
   const meta = pageMeta[pathname] || { title: 'WhatsApp Automate', subtitle: '' }
   const { theme, toggleTheme, profile } = useApp()
   const [isConnected, setIsConnected] = useState(false)
@@ -37,15 +40,25 @@ export default function Header() {
 
   return (
     <header className="header">
-      <div className="header-left">
-        <h1>{meta.title}</h1>
-        {meta.subtitle && <p>{meta.subtitle}</p>}
+      <div className="header-left" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        {/* Hamburger — visible on all screen sizes */}
+        <button
+          className="header-btn"
+          onClick={onMenuToggle}
+          aria-label="Toggle menu"
+        >
+          <Menu size={18} />
+        </button>
+        <div>
+          <h1 className="header-title">{meta.title}</h1>
+          {meta.subtitle && <p className="header-subtitle">{meta.subtitle}</p>}
+        </div>
       </div>
 
       <div className="header-right">
-        <button 
-          className="header-btn" 
-          title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`} 
+        <button
+          className="header-btn"
+          title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
           onClick={toggleTheme}
         >
           {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
@@ -53,17 +66,23 @@ export default function Header() {
         <button className="header-btn" title="Refresh" onClick={() => window.location.reload()}>
           <RefreshCw size={16} />
         </button>
-        <button className="header-btn" title="Notifications">
+        <button className="header-btn header-btn-bell" title="Notifications">
           <Bell size={16} />
         </button>
         {isConnected && (
-          <div className="avatar" title={`${profile.name} (${profile.email})`}>
-            {initial}
-          </div>
+          <button
+            onClick={() => navigate('/profile')}
+            title={`${profile.name || 'Profile'} — click to edit`}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+          >
+            <div className="avatar" style={{ overflow: 'hidden' }}>
+              {profile.avatar
+                ? <img src={profile.avatar} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+                : initial}
+            </div>
+          </button>
         )}
       </div>
     </header>
   )
 }
-
-

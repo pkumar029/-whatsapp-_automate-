@@ -53,6 +53,14 @@ export const contactsApi = {
   delete: (id) => api.delete(`/contacts/${id}`),
   search: (query) => api.get('/contacts/search', { params: { q: query } }),
   sync: () => api.post('/contacts/sync'),
+  getChats: () => api.get('/contacts/chats'),
+  getGroupMembers: (id) => api.get(`/contacts/${id}/group-members`),
+  getProfilePic: (id) => api.get(`/contacts/${id}/profile-pic`),
+  exportCsv: () => api.get('/contacts/export', { responseType: 'blob' }),
+  importCsv: (file) => {
+    const fd = new FormData(); fd.append('file', file)
+    return api.post('/contacts/import', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
 }
 
 // ─── Messages API ─────────────────────────────────────────────
@@ -103,6 +111,25 @@ export const campaignsApi = {
   getJobs: (id, params) => api.get(`/campaigns/${id}/jobs`, { params }),
   cancelJob: (campaignId, jobId) => api.post(`/campaigns/${campaignId}/jobs/${jobId}/cancel`),
   retryJob: (campaignId, jobId) => api.post(`/campaigns/${campaignId}/jobs/${jobId}/retry`),
+}
+
+// ─── Groups API (Phase 12) ────────────────────────────────────
+export const groupsApi = {
+  create: (data) => api.post('/contacts/group/create', data),
+  addMembers: (data) => api.post('/contacts/group/add-members', data),
+  removeMember: (data) => api.post('/contacts/group/remove-member', data),
+  promote: (data) => api.post('/contacts/group/promote', data),
+  demote: (data) => api.post('/contacts/group/demote', data),
+  rename: (data) => api.post('/contacts/group/rename', data),
+  setDescription: (data) => api.post('/contacts/group/set-description', data),
+  getInviteLink: (groupId) => api.get('/contacts/group/invite-link', { params: { groupId } }),
+  leave: (data) => api.post('/contacts/group/leave', data),
+}
+
+// ─── Status API (Phase 13) ────────────────────────────────────
+export const statusApi = {
+  list: () => api.get('/contacts/status/list'),
+  post: (data) => api.post('/contacts/status/post', data),
 }
 
 // ─── Dashboard Summary ────────────────────────────────────────

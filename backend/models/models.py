@@ -131,6 +131,7 @@ class Contact(Base):
     tags = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=True)
     is_blocked = Column(Boolean, default=False)
+    wa_account = Column(String(100), nullable=True)   # connected WhatsApp phone that owns this contact
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -140,6 +141,7 @@ class Contact(Base):
         Index("idx_contact_phone", "phone"),
         Index("idx_contact_name", "name"),
         Index("idx_contact_active", "is_active"),
+        Index("idx_contact_wa_account", "wa_account"),
     )
 
 

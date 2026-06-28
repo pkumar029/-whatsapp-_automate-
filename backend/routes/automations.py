@@ -4,10 +4,10 @@ Automations Routes — CRUD, steps, activate/deactivate, run
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from typing import Optional
 from sqlalchemy.orm import Session
-from database.connection import get_db
+from database.connection import get_db, SessionLocal
 from services import automations_service
 from services.automation_runner import run_automation
-from models.schemas import AutomationCreate, AutomationUpdate, AutomationListResponse
+from models.schemas import AutomationCreate, AutomationUpdate, AutomationListResponse, StepSchema
 
 router = APIRouter(prefix="/automations", tags=["Automations"])
 
@@ -73,12 +73,24 @@ async def deactivate(automation_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{automation_id}/run")
 async def run_now(automation_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    """Trigger an automation run immediately (runs in background)."""
+    """Trigger an automation run immediately (runs in background with its own session)."""
     automation = automations_service.get_automation_by_id(db, automation_id)
     if not automation:
         raise HTTPException(status_code=404, detail="Automation not found")
-    background_tasks.add_task(run_automation, db, automation_id, {"trigger": "manual"})
-    return {"success": True, "message": f"Automation '{automation.name}' triggered"}
+    name = automation.name
+
+    def _bg_run():
+        bg_db = SessionLocal()
+        try:
+            run_automation(bg_db, automation_id, {"trigger": "manual"})
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Background automation run failed: {e}")
+        finally:
+            bg_db.close()
+
+    background_tasks.add_task(_bg_run)
+    return {"success": True, "message": f"Automation '{name}' triggered"}
 
 
 @router.get("/{automation_id}/steps")
@@ -87,3 +99,30 @@ async def get_steps(automation_id: int, db: Session = Depends(get_db)):
     if not automation:
         raise HTTPException(status_code=404, detail="Automation not found")
     return automation.steps
+
+
+@router.post("/{automation_id}/steps", status_code=201)
+async def add_step(automation_id: int, data: StepSchema, db: Session = Depends(get_db)):
+    """Add a single step to an automation."""
+    step = automations_service.add_step(db, automation_id, data)
+    if not step:
+        raise HTTPException(status_code=404, detail="Automation not found")
+    return {"success": True, "id": step.id, "step_order": step.step_order}
+
+
+@router.put("/{automation_id}/steps/{step_id}")
+async def update_step(automation_id: int, step_id: int, data: StepSchema, db: Session = Depends(get_db)):
+    """Update a single automation step."""
+    step = automations_service.update_step(db, automation_id, step_id, data)
+    if not step:
+        raise HTTPException(status_code=404, detail="Step not found")
+    return {"success": True, "id": step.id}
+
+
+@router.delete("/{automation_id}/steps/{step_id}")
+async def delete_step(automation_id: int, step_id: int, db: Session = Depends(get_db)):
+    """Delete a single automation step."""
+    deleted = automations_service.delete_step(db, automation_id, step_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Step not found")
+    return {"success": True, "message": "Step deleted"}

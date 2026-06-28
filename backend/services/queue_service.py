@@ -276,15 +276,106 @@ def process_due_jobs(db: Session):
         db.commit()
 
 
+def cron_matches(cron_expr: str, dt: datetime) -> bool:
+    """Evaluate pure-python cron matching for 5-field and 6-field formats."""
+    parts = cron_expr.strip().split()
+    if len(parts) == 6:
+        min_, hr, day, month, dow = parts[1:6]
+    elif len(parts) == 5:
+        min_, hr, day, month, dow = parts
+    else:
+        return False
+        
+    def field_matches(field: str, val: int) -> bool:
+        if field == '*':
+            return True
+        if ',' in field:
+            return any(field_matches(f, val) for f in field.split(','))
+        if '/' in field:
+            lhs, rhs = field.split('/')
+            step = int(rhs)
+            if lhs == '*':
+                return val % step == 0
+            if '-' in lhs:
+                start, end = map(int, lhs.split('-'))
+                return start <= val <= end and (val - start) % step == 0
+            return val % step == 0
+        if '-' in field:
+            start, end = map(int, field.split('-'))
+            return start <= val <= end
+        return int(field) == val
+
+    # Align python weekday (0=Monday, 6=Sunday) to cron DOW (0=Sunday, 1=Monday, ..., 6=Saturday)
+    cron_dow_val = (dt.weekday() + 1) % 7
+    
+    try:
+        return (
+            field_matches(min_, dt.minute) and
+            field_matches(hr, dt.hour) and
+            field_matches(day, dt.day) and
+            field_matches(month, dt.month) and
+            (field_matches(dow, cron_dow_val) or (dow == '7' and cron_dow_val == 0))
+        )
+    except Exception:
+        return False
+
+
+def process_scheduled_automations(db: Session, now: datetime):
+    """Scan active schedule automations and trigger runs if the cron expression matches."""
+    from models.models import Automation, TriggerType
+    from services.automation_runner import run_automation
+    import threading
+    
+    try:
+        active_schedules = db.query(Automation).filter(
+            Automation.is_active == True,
+            Automation.trigger_type == TriggerType.schedule
+        ).all()
+        
+        for automation in active_schedules:
+            config = automation.trigger_config or {}
+            cron_expr = config.get("cron")
+            if not cron_expr:
+                continue
+                
+            if cron_matches(cron_expr, now):
+                logger.info(f"Triggering scheduled automation '{automation.name}' (ID: {automation.id}) via cron: {cron_expr}")
+                
+                # Execute run in a separate thread to prevent blocking the queue worker
+                def run_bg(auto_id):
+                    from database.connection import SessionLocal
+                    bg_db = SessionLocal()
+                    try:
+                        run_automation(bg_db, auto_id, {"trigger": "schedule"})
+                    except Exception as e:
+                        logger.error(f"Scheduled automation {auto_id} background run failed: {e}")
+                    finally:
+                        bg_db.close()
+                        
+                t = threading.Thread(target=run_bg, args=(automation.id,))
+                t.daemon = True
+                t.start()
+                
+    except Exception as e:
+        logger.error(f"Failed to process scheduled automations: {e}", exc_info=True)
+
+
 async def run_queue_worker_loop():
-    """Asynchronous infinite loop that runs every 5 seconds to process due jobs."""
+    """Asynchronous infinite loop that runs every 5 seconds to process due jobs and cron triggers."""
     from database.connection import SessionLocal
     logger.info("Queue worker background loop started.")
+    last_cron_check = None
     while True:
         try:
-            # We open an isolated session to prevent transaction issues
             with SessionLocal() as db:
                 process_due_jobs(db)
+                
+                # Check scheduled automations once a minute (when the minute changes)
+                now = datetime.utcnow()
+                current_min = now.replace(second=0, microsecond=0)
+                if last_cron_check is None or current_min > last_cron_check:
+                    last_cron_check = current_min
+                    process_scheduled_automations(db, now)
         except Exception as err:
             logger.error(f"Error in queue worker loop iteration: {err}", exc_info=True)
         await asyncio.sleep(5)

@@ -30,49 +30,124 @@ def execute_step(db: Session, step: AutomationStep, context: Dict[str, Any]) -> 
     config = step.config or {}
 
     if step.step_type == StepType.send_message:
-        phone = context.get("phone") or config.get("phone")
         message_template = config.get("message", "Hello!")
+        target_type = config.get("target_type", "single")
 
-        # Simple template variable substitution
-        contact = context.get("contact")
-        if not contact and context.get("contact_id"):
-            contact = db.query(Contact).filter(Contact.id == context.get("contact_id")).first()
-            if contact:
-                context["contact"] = contact
+        if target_type == "group":
+            target_tag = config.get("target_tag", "")
+            stagger_seconds = int(config.get("stagger_seconds", 5))
 
-        if contact:
-            message_template = message_template.replace("{{name}}", contact.name or "")
-            message_template = message_template.replace("{{phone}}", contact.phone or "")
+            # Query candidate contacts
+            query = db.query(Contact).filter(Contact.is_active == True)
+            if target_tag == "all":
+                contacts_list = query.all()
+            elif target_tag == "whatsapp_groups":
+                contacts_list = query.filter(Contact.phone.like("%@g.us")).all()
+            elif target_tag:
+                # Filter in Python for database compatibility
+                all_contacts = query.all()
+                contacts_list = []
+                for c in all_contacts:
+                    c_tags = c.tags or []
+                    if isinstance(c_tags, list) and target_tag in c_tags:
+                        contacts_list.append(c)
+                    elif isinstance(c_tags, str) and target_tag in c_tags:
+                        contacts_list.append(c)
+                    elif c.notes and target_tag.lower() in c.notes.lower():
+                        contacts_list.append(c)
+            else:
+                contacts_list = query.all()
 
-        if phone:
-            # Save message record
-            msg = Message(
-                phone=phone,
-                contact_id=context.get("contact_id"),
-                direction=MessageDirection.outbound,
-                content=message_template,
-                status=MessageStatus.pending,
-                automation_id=context.get("automation_id"),
-            )
-            db.add(msg)
-            db.flush()
+            logger.info(f"Targeting {len(contacts_list)} contacts matching tag/filter '{target_tag}' with delay {stagger_seconds}s")
+
+            for idx, contact in enumerate(contacts_list):
+                if idx > 0 and stagger_seconds > 0:
+                    time.sleep(stagger_seconds)
+
+                # Render template variables
+                body = message_template.replace("{{name}}", contact.name or "")
+                body = body.replace("{{phone}}", contact.phone or "")
+
+                phone = contact.phone
+                msg = Message(
+                    phone=phone,
+                    contact_id=contact.id,
+                    direction=MessageDirection.outbound,
+                    content=body,
+                    status=MessageStatus.pending,
+                    automation_id=context.get("automation_id"),
+                )
+                db.add(msg)
+                db.flush()
+
+                try:
+                    from services import whatsapp_service
+                    whatsapp_service.send_whatsapp_message(db, phone, body)
+                    msg.status = MessageStatus.sent
+                    msg.sent_at = datetime.utcnow()
+                    db.flush()
+                except Exception as send_err:
+                    msg.status = MessageStatus.failed
+                    msg.error_message = str(send_err)
+                    db.flush()
+                    logger.error(f"Failed to send scheduled message to {phone}: {send_err}")
             
-            try:
-                from services import whatsapp_service
-                whatsapp_service.send_whatsapp_message(db, phone, message_template)
-                msg.status = MessageStatus.sent
-                msg.sent_at = datetime.utcnow()
-                db.flush()
-                logger.info(f"Message successfully sent to {phone} via automation")
-            except Exception as send_err:
-                msg.status = MessageStatus.failed
-                msg.error_message = str(send_err)
-                db.flush()
-                logger.error(f"Failed to send automation message: {send_err}")
-                raise StepExecutionError(f"Failed to send WhatsApp message: {send_err}")
+            db.commit()
+            return context
+        else:
+            phone = context.get("phone") or config.get("phone")
+            
+            # Resolve contact by ID or Phone number
+            contact = context.get("contact")
+            if not contact:
+                contact_id_val = context.get("contact_id")
+                if contact_id_val:
+                    contact = db.query(Contact).filter(Contact.id == contact_id_val).first()
+                elif phone:
+                    clean_phone = "".join(filter(str.isdigit, phone))
+                    if clean_phone:
+                        contact = db.query(Contact).filter(
+                            (Contact.phone == phone) | 
+                            (Contact.phone.like(f"%{clean_phone}"))
+                        ).first()
                 
-            context["last_message_id"] = msg.id
-        return context
+                if contact:
+                    context["contact"] = contact
+                    context["contact_id"] = contact.id
+
+            if contact:
+                message_template = message_template.replace("{{name}}", contact.name or "")
+                message_template = message_template.replace("{{phone}}", contact.phone or "")
+
+            if phone:
+                # Save message record
+                msg = Message(
+                    phone=phone,
+                    contact_id=context.get("contact_id"),
+                    direction=MessageDirection.outbound,
+                    content=message_template,
+                    status=MessageStatus.pending,
+                    automation_id=context.get("automation_id"),
+                )
+                db.add(msg)
+                db.flush()
+                
+                try:
+                    from services import whatsapp_service
+                    whatsapp_service.send_whatsapp_message(db, phone, message_template)
+                    msg.status = MessageStatus.sent
+                    msg.sent_at = datetime.utcnow()
+                    db.flush()
+                    logger.info(f"Message successfully sent to {phone} via automation")
+                except Exception as send_err:
+                    msg.status = MessageStatus.failed
+                    msg.error_message = str(send_err)
+                    db.flush()
+                    logger.error(f"Failed to send automation message: {send_err}")
+                    raise StepExecutionError(f"Failed to send WhatsApp message: {send_err}")
+                    
+                context["last_message_id"] = msg.id
+            return context
 
     elif step.step_type == StepType.delay:
         seconds = int(config.get("seconds", 1))

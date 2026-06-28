@@ -1,5 +1,5 @@
-import { createContext, useContext, useState, useEffect } from 'react'
-import { whatsappApi } from '../services/api'
+import { createContext, useContext, useState, useEffect, useRef } from 'react'
+import { whatsappApi, contactsApi } from '../services/api'
 
 const AppContext = createContext()
 
@@ -41,6 +41,8 @@ export function AppProvider({ children }) {
       email: '',
       company: '',
       role: '',
+      about: 'Hey there! I am using WhatsApp.',
+      avatar: null,
       isProfileConfigured: false
     }
   })
@@ -71,12 +73,30 @@ export function AppProvider({ children }) {
 
   const [sessionStatus, setSessionStatus] = useState({ status: 'disconnected' })
   const [loadingSession, setLoadingSession] = useState(true)
+  const prevStatusRef = useRef('disconnected')
 
   const refreshSessionStatus = async () => {
     try {
       const res = await whatsappApi.getStatus()
-      setSessionStatus(res.data)
-      return res.data
+      const data = res.data
+      setSessionStatus(data)
+
+      // Auto-sync contacts when WhatsApp first becomes connected
+      if (data.status === 'connected' && prevStatusRef.current !== 'connected') {
+        prevStatusRef.current = 'connected'
+        const lastSync = localStorage.getItem('wa_last_sync')
+        const now = Date.now()
+        if (!lastSync || now - parseInt(lastSync, 10) > 30 * 60 * 1000) {
+          try {
+            await contactsApi.sync()
+            localStorage.setItem('wa_last_sync', String(now))
+          } catch {}
+        }
+      } else if (data.status !== 'connected') {
+        prevStatusRef.current = data.status
+      }
+
+      return data
     } catch (err) {
       setSessionStatus({ status: 'disconnected' })
     } finally {

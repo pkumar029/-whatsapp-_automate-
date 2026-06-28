@@ -159,7 +159,7 @@ export default function Campaigns() {
   const [name, setName] = useState('')
   const [delaySeconds, setDelaySeconds] = useState(5)
   const [concurrency, setConcurrency] = useState(1)
-  const [template, setTemplate] = useState('Hello {{name}},\n\nThis is a notification from WA Automate. Have a great day!')
+  const [template, setTemplate] = useState('')
   const [scheduleDate, setScheduleDate] = useState(() => {
     // Current local datetime string formatted for datetime-local inputs
     const d = new Date()
@@ -368,11 +368,6 @@ export default function Campaigns() {
     }
     const current = jobStatusMap[status] || { label: status, color: 'var(--text-muted)' }
     return <span style={{ color: current.color, fontWeight: 600, fontSize: '11px' }}>{current.label.toUpperCase()}</span>
-  }
-
-  // Render variables buttons helper
-  const insertTemplateVar = (variable) => {
-    setTemplate(prev => prev + ` {{${variable}}}`)
   }
 
   const filteredContacts = contacts.filter(c => 
@@ -784,36 +779,60 @@ export default function Campaigns() {
                     />
                   </div>
 
-                  {/* Template Textarea */}
+                  {/* Template Body */}
+                  {/* Message Body */}
                   <div className="form-group" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <label className="form-label" style={{ margin: 0 }}>Message Template Body *</label>
-                      <span style={{ fontSize: '10px', color: 'var(--accent-primary)' }}>Personalized tags enabled</span>
+                      <label className="form-label" style={{ margin: 0 }}>Message Body *</label>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        {template.length > 0 ? `${template.length} characters` : ''}
+                      </span>
                     </div>
-                    <textarea
-                      className="form-input"
-                      placeholder="Type your campaign message..."
-                      value={template}
-                      onChange={e => setTemplate(e.target.value)}
-                      style={{ flex: 1, minHeight: 120, resize: 'vertical', fontFamily: 'monospace', fontSize: 'var(--font-size-xs)', padding: 10 }}
-                      required
-                    />
-                    
-                    {/* Interpolate Helpers */}
-                    <div style={{ marginTop: 8 }}>
-                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Insert variable tag:</span>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {['name', 'phone', 'email', 'notes'].map(v => (
-                          <button
-                            key={v}
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => insertTemplateVar(v)}
-                            style={{ padding: '2px 8px', fontSize: '10px', height: 'auto' }}
-                          >
-                            +{v}
-                          </button>
-                        ))}
+
+                    {/* WhatsApp-style chat compose box */}
+                    <div style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      border: '1px solid var(--border-primary)',
+                      borderRadius: 12,
+                      overflow: 'hidden',
+                      background: 'var(--bg-secondary)',
+                      flex: 1,
+                    }}>
+                      <textarea
+                        placeholder="Type your WhatsApp message here..."
+                        value={template}
+                        onChange={e => setTemplate(e.target.value)}
+                        required
+                        style={{
+                          flex: 1,
+                          width: '100%',
+                          minHeight: 160,
+                          padding: '14px 16px',
+                          border: 'none',
+                          outline: 'none',
+                          resize: 'vertical',
+                          background: 'transparent',
+                          color: 'var(--text-primary)',
+                          fontSize: 15,
+                          lineHeight: 1.65,
+                          fontFamily: 'inherit',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                      {/* Bottom bar: char count + emoji hint */}
+                      <div style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        padding: '6px 12px',
+                        borderTop: '1px solid var(--border-primary)',
+                        background: 'var(--bg-tertiary)',
+                      }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                          This message will be sent as-is to all selected contacts
+                        </span>
+                        <span style={{ fontSize: 11, color: template.length > 1000 ? 'var(--accent-rose)' : 'var(--text-muted)' }}>
+                          {template.length} / 4096
+                        </span>
                       </div>
                     </div>
                   </div>

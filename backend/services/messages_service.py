@@ -20,8 +20,12 @@ def get_messages(
     search: Optional[str] = None,
     direction: Optional[str] = None,
     contact_id: Optional[int] = None,
+    wa_account: Optional[str] = None,
 ) -> dict:
     query = db.query(Message)
+
+    if wa_account:
+        query = query.join(Contact).filter(Contact.wa_account == wa_account)
 
     if search:
         s = f"%{search}%"
@@ -94,9 +98,15 @@ def send_message(db: Session, data: MessageSend) -> Message:
     return msg
 
 
-def get_sent_count(db: Session) -> int:
-    return db.query(func.count(Message.id)).filter(Message.status == MessageStatus.sent).scalar() or 0
+def get_sent_count(db: Session, wa_account: Optional[str] = None) -> int:
+    query = db.query(func.count(Message.id)).filter(Message.status == MessageStatus.sent)
+    if wa_account:
+        query = query.join(Contact).filter(Contact.wa_account == wa_account)
+    return query.scalar() or 0
 
 
-def get_failed_count(db: Session) -> int:
-    return db.query(func.count(Message.id)).filter(Message.status == MessageStatus.failed).scalar() or 0
+def get_failed_count(db: Session, wa_account: Optional[str] = None) -> int:
+    query = db.query(func.count(Message.id)).filter(Message.status == MessageStatus.failed)
+    if wa_account:
+        query = query.join(Contact).filter(Contact.wa_account == wa_account)
+    return query.scalar() or 0

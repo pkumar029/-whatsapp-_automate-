@@ -14,6 +14,7 @@ class ContactCreate(BaseModel):
     email: Optional[str] = None
     notes: Optional[str] = None
     tags: Optional[List[str]] = None
+    wa_account: Optional[str] = None  # set by backend from current session if not provided
 
     @field_validator('phone')
     @classmethod
@@ -53,6 +54,7 @@ class ContactResponse(BaseModel):
     tags: Optional[List[str]]
     is_active: bool
     is_blocked: bool
+    wa_account: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

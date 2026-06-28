@@ -28,6 +28,21 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Database connected")
     else:
         logger.warning("⚠️  Database connection failed — check .env DB_ settings")
+
+    # Safe schema migration — add wa_account column if missing
+    try:
+        from database.connection import engine
+        from sqlalchemy import text as _text
+        with engine.connect() as _conn:
+            _conn.execute(_text(
+                "ALTER TABLE contacts ADD COLUMN wa_account VARCHAR(100) NULL"
+            ))
+            _conn.commit()
+        logger.info("✅ Migration: added wa_account column to contacts")
+    except Exception as _e:
+        if "Duplicate column" not in str(_e) and "already exists" not in str(_e).lower():
+            logger.warning(f"Migration note: {_e}")
+        # Column already exists — no action needed
     
     # Start the queue worker background loop
     import asyncio
@@ -58,10 +73,15 @@ app = FastAPI(
 
 
 # ─── CORS ─────────────────────────────────────────────────────
+# In production, nginx serves everything on port 80 so "*" is safe for LAN
+_cors_origins = (
+    ["*"] if settings.CORS_ORIGINS == "*"
+    else [o.strip() for o in settings.CORS_ORIGINS.split(",")]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.FRONTEND_URL, "http://localhost:5173", "http://localhost:3000"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=False if "*" in _cors_origins else True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
