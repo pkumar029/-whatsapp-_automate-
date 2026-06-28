@@ -2,6 +2,7 @@
 import axios from 'axios'
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:7001/api/v1'
+const ORIGIN_URL = BASE_URL.replace(/\/api\/v1\/?$/, '')
 
 // ─── Axios Instance ─────────────────────────────────────────
 const api = axios.create({
@@ -100,7 +101,7 @@ export const logsApi = {
 
 // ─── Health API ───────────────────────────────────────────────
 export const healthApi = {
-  check: () => api.get('/health'),
+  check: () => axios.get(`${ORIGIN_URL}/health`),
 }
 
 // ─── Campaigns & Queue API ─────────────────────────────────────

@@ -110,6 +110,12 @@ async def health_check():
     }
 
 
+@app.get("/api/v1/health", tags=["System"])
+async def health_check_v1():
+    """Health check under API prefix — same as /health."""
+    return await health_check()
+
+
 @app.get("/", tags=["System"])
 async def root():
     """Root endpoint — API info."""
