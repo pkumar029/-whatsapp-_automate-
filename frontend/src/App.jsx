@@ -12,8 +12,14 @@ import Status from './pages/Status/Status'
 import Login from './pages/Login/Login'
 import { useApp } from './context/AppContext'
 
+// Remounts Layout (and all child pages) when the connected WhatsApp account changes
+function KeyedLayout() {
+  const { accountKey } = useApp()
+  return <Layout key={accountKey} />
+}
+
 function ProtectedRoute() {
-  const { sessionStatus, loadingSession, accountKey } = useApp()
+  const { sessionStatus, loadingSession } = useApp()
 
   if (loadingSession) {
     return (
@@ -56,7 +62,7 @@ function App() {
         <Route path="login" element={<Login />} />
         
         <Route element={<ProtectedRoute />}>
-          <Route path="/" element={<Layout key={accountKey} />}>
+          <Route path="/" element={<KeyedLayout />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="automations" element={<Automations />} />
