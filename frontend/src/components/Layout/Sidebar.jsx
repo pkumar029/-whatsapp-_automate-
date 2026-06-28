@@ -152,9 +152,11 @@ export default function Sidebar({ isOpen, isCollapsed, onClose }) {
             <div className="status-value" style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {profile.name || 'User Profile'}
             </div>
-            <div className="status-label" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {profile.role || 'Administrator'}
-            </div>
+            {(profile.role || sessionStatus.phone) && (
+              <div className="status-label" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {profile.role || sessionStatus.phone}
+              </div>
+            )}
           </div>
         </Link>
       </div>
