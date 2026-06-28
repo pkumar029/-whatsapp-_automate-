@@ -44,6 +44,24 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Migration note: {_e}")
         # Column already exists — no action needed
     
+    # Create system_settings table if it doesn't exist
+    try:
+        from sqlalchemy import text as _text2
+        with engine.connect() as _conn2:
+            _conn2.execute(_text2(
+                "CREATE TABLE IF NOT EXISTS system_settings ("
+                "  id INT AUTO_INCREMENT PRIMARY KEY,"
+                "  `key` VARCHAR(100) NOT NULL UNIQUE,"
+                "  value TEXT,"
+                "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+                "  INDEX idx_sys_key (`key`)"
+                ")"
+            ))
+            _conn2.commit()
+        logger.info("✅ system_settings table ready")
+    except Exception as _e2:
+        logger.warning(f"system_settings migration note: {_e2}")
+
     # Start the queue worker background loop
     import asyncio
     from services.queue_service import run_queue_worker_loop

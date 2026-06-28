@@ -271,6 +271,16 @@ class Campaign(Base):
     )
 
 
+# ─── System Settings ──────────────────────────────────────────
+class SystemSettings(Base):
+    __tablename__ = "system_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    key = Column(String(100), unique=True, nullable=False, index=True)
+    value = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 # ─── Message Job ──────────────────────────────────────────────
 class MessageJob(Base):
     __tablename__ = "message_jobs"

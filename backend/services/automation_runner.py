@@ -206,10 +206,14 @@ def run_automation(db: Session, automation_id: int, trigger_data: Optional[Dict]
     if not automation:
         raise ValueError(f"Automation {automation_id} not found")
 
+    # Respect log control settings
+    from services import logs_service as _ls
+    _log_cfg = _ls.get_log_settings(db)
+    _log_persisted = _log_cfg["logging_enabled"]
+
     logger.info(f"Starting automation run: {automation.name} (ID: {automation_id})")
     start_time = time.time()
 
-    # Create log entry
     log = AutomationLog(
         automation_id=automation_id,
         status=LogStatus.running,
@@ -217,9 +221,13 @@ def run_automation(db: Session, automation_id: int, trigger_data: Optional[Dict]
         total_steps=len(automation.steps),
         started_at=datetime.utcnow(),
     )
-    db.add(log)
-    db.commit()
-    db.refresh(log)
+    if _log_persisted:
+        db.add(log)
+        db.commit()
+        db.refresh(log)
+        _max = _log_cfg["max_log_entries"]
+        if _max > 0:
+            _ls.trim_to_limit(db, _max)
 
     # Build execution context
     context: Dict[str, Any] = {
@@ -266,8 +274,11 @@ def run_automation(db: Session, automation_id: int, trigger_data: Optional[Dict]
         automation.run_count = (automation.run_count or 0) + 1
         automation.last_run = datetime.utcnow()
 
-        db.commit()
-        db.refresh(log)
+        if _log_persisted:
+            db.commit()
+            db.refresh(log)
+        else:
+            db.commit()
         logger.info(f"Automation {automation_id} completed in {elapsed_ms:.0f}ms")
         return log
 
@@ -283,7 +294,10 @@ def run_automation(db: Session, automation_id: int, trigger_data: Optional[Dict]
         automation.run_count = (automation.run_count or 0) + 1
         automation.last_run = datetime.utcnow()
 
-        db.commit()
-        db.refresh(log)
+        if _log_persisted:
+            db.commit()
+            db.refresh(log)
+        else:
+            db.commit()
         logger.error(f"Automation {automation_id} failed: {e}")
         return log

@@ -93,6 +93,9 @@ export const logsApi = {
   getById: (id) => api.get(`/logs/${id}`),
   getByAutomation: (automationId, params) => api.get(`/logs/automation/${automationId}`, { params }),
   clear: () => api.delete('/logs'),
+  getSettings: () => api.get('/logs/settings'),
+  saveSettings: (data) => api.put('/logs/settings', data),
+  export: () => api.get('/logs/export', { responseType: 'blob' }),
 }
 
 // ─── Health API ───────────────────────────────────────────────

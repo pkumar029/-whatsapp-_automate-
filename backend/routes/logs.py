@@ -2,13 +2,21 @@
 Logs Routes — List and manage execution logs
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from typing import Optional
 from sqlalchemy.orm import Session
 from database.connection import get_db
 from services import logs_service
 from models.schemas import LogListResponse
+from pydantic import BaseModel
+import csv, io
 
 router = APIRouter(prefix="/logs", tags=["Logs"])
+
+
+class LogSettingsBody(BaseModel):
+    logging_enabled: bool = True
+    max_log_entries: int = 0
 
 
 @router.get("", response_model=LogListResponse)
@@ -49,3 +57,33 @@ async def clear_logs(db: Session = Depends(get_db)):
     """Clear all execution logs."""
     count = logs_service.clear_logs(db)
     return {"success": True, "deleted": count}
+
+
+@router.get("/settings")
+async def get_log_settings(db: Session = Depends(get_db)):
+    """Get log control settings."""
+    return logs_service.get_log_settings(db)
+
+
+@router.put("/settings")
+async def save_log_settings(body: LogSettingsBody, db: Session = Depends(get_db)):
+    """Save log control settings and trim logs if max_log_entries is set."""
+    return logs_service.save_log_settings(db, body.logging_enabled, body.max_log_entries)
+
+
+@router.get("/export")
+async def export_logs(db: Session = Depends(get_db)):
+    """Export all logs as a CSV file."""
+    rows = logs_service.export_logs_data(db)
+    output = io.StringIO()
+    fields = ["id", "automation_name", "status", "started_at", "finished_at",
+              "execution_time_ms", "steps_executed", "total_steps", "error_message", "log_output"]
+    writer = csv.DictWriter(output, fieldnames=fields)
+    writer.writeheader()
+    writer.writerows(rows)
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=automation_logs.csv"},
+    )

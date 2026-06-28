@@ -7,9 +7,9 @@ import {
   Sun, Moon, Volume2, VolumeX, Timer, Ban, Monitor,
   Info, Globe, Key, Check, X, Eye, EyeOff, Send,
   Keyboard, AlertCircle, CheckCircle2, Zap, Database,
-  Image as ImageIcon, Archive
+  Image as ImageIcon, Archive, FileDown, Trash2, ScrollText
 } from 'lucide-react'
-import { whatsappApi } from '../../services/api'
+import { whatsappApi, logsApi } from '../../services/api'
 import { useApp } from '../../context/AppContext'
 import { formatIST } from '../../utils/date'
 import { getErrorMessage } from '../../utils/error'
@@ -174,7 +174,7 @@ function ConnectPanel({ onConnected }) {
           onFocus={e => e.target.style.borderColor = WA.green}
           onBlur={e => e.target.style.borderColor = WA.border}
         />
-        <div style={{ fontSize: 11, color: WA.sub, marginBottom: 14 }}>Requires bridge running on port 3000</div>
+        <div style={{ fontSize: 11, color: WA.sub, marginBottom: 14 }}>Requires bridge running on port 7002</div>
         <button type="submit" style={{ width: '100%', padding: '12px', borderRadius: 10, border: 'none', background: WA.green, color: '#111b21', fontWeight: 700, fontSize: 15, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
           {method === 'qr' ? <><QrCode size={16} />Generate QR Code</> : <><Hash size={16} />Generate Pairing Code</>}
         </button>
@@ -634,6 +634,170 @@ function HelpSection() {
   )
 }
 
+// ─── Log Control Section ─────────────────────────────────────────
+function LogControlSection() {
+  const [settings, setSettings] = useState({ logging_enabled: true, max_log_entries: 0 })
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [toast, setToast] = useState({ msg: '', type: '' })
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [exporting, setExporting] = useState(false)
+
+  const showToast = (msg, type = 'ok') => {
+    setToast({ msg, type })
+    setTimeout(() => setToast({ msg: '', type: '' }), 3000)
+  }
+
+  useEffect(() => {
+    logsApi.getSettings()
+      .then(r => setSettings(r.data))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const r = await logsApi.saveSettings(settings)
+      setSettings(r.data)
+      showToast('Log settings saved')
+    } catch {
+      showToast('Failed to save settings', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const res = await logsApi.export()
+      const url = URL.createObjectURL(res.data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `automation_logs_${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+      showToast('Export downloaded')
+    } catch {
+      showToast('Export failed', 'error')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const handleClear = async () => {
+    if (!confirmClear) { setConfirmClear(true); return }
+    try {
+      await logsApi.clear()
+      showToast('All logs cleared')
+    } catch {
+      showToast('Failed to clear logs', 'error')
+    } finally {
+      setConfirmClear(false)
+    }
+  }
+
+  if (loading) return (
+    <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+      <RefreshCw size={20} color={WA.sub} style={{ animation: 'spin 1s linear infinite' }} />
+    </div>
+  )
+
+  return (
+    <div>
+      <Toast msg={toast.msg} type={toast.type} />
+
+      {/* Enable / disable logging */}
+      <SecLabel>Logging</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <Row
+          icon={<ScrollText size={17} color="#fff" />}
+          iconBg="#25D366"
+          label="Enable activity logging"
+          sublabel="Record automation runs, errors, and events"
+          right={
+            <Toggle
+              on={settings.logging_enabled}
+              onChange={() => setSettings(s => ({ ...s, logging_enabled: !s.logging_enabled }))}
+            />
+          }
+          last
+        />
+      </div>
+
+      {/* Max entries */}
+      <SecLabel>Log Retention</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', border: `1px solid ${WA.border}`, overflow: 'hidden' }}>
+        <div style={{ padding: '14px 20px', borderBottom: `1px solid ${WA.border}` }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div>
+              <div style={{ fontSize: 15, color: WA.text }}>Maximum log entries</div>
+              <div style={{ fontSize: 12, color: WA.sub, marginTop: 2 }}>Oldest logs are deleted automatically when limit is reached</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input
+              type="number"
+              min="0"
+              max="10000"
+              value={settings.max_log_entries}
+              onChange={e => setSettings(s => ({ ...s, max_log_entries: Math.max(0, parseInt(e.target.value) || 0) }))}
+              disabled={!settings.logging_enabled}
+              style={{
+                width: 100, padding: '8px 12px',
+                background: WA.input, border: `1px solid ${WA.border}`,
+                borderRadius: 8, color: settings.logging_enabled ? WA.text : WA.sub,
+                fontSize: 15, outline: 'none',
+                opacity: settings.logging_enabled ? 1 : 0.5,
+              }}
+              onFocus={e => { if (settings.logging_enabled) e.target.style.borderColor = WA.green }}
+              onBlur={e => e.target.style.borderColor = WA.border}
+            />
+            <span style={{ fontSize: 13, color: WA.sub }}>entries &nbsp;(0 = unlimited)</span>
+          </div>
+        </div>
+        <div style={{ padding: '11px 20px', fontSize: 12, color: WA.sub, lineHeight: 1.6 }}>
+          Tip: set 100–500 for a Raspberry Pi to keep database size small.
+        </div>
+      </div>
+
+      {/* Save button */}
+      <div style={{ margin: '0 20px 20px' }}>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          style={{ width: '100%', padding: '12px', borderRadius: 10, border: 'none', background: WA.green, color: '#111b21', fontWeight: 700, fontSize: 15, cursor: saving ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: saving ? 0.7 : 1 }}
+        >
+          {saving ? <><RefreshCw size={15} style={{ animation: 'spin 1s linear infinite' }} /> Saving…</> : <><Check size={15} /> Save Log Settings</>}
+        </button>
+      </div>
+
+      {/* Data management */}
+      <SecLabel>Data Management</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <Row
+          icon={<FileDown size={17} color="#fff" />}
+          iconBg="#0a7aff"
+          label="Export logs"
+          sublabel="Download all logs as a CSV file"
+          onClick={exporting ? undefined : handleExport}
+          right={exporting ? <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> : null}
+        />
+        <Row
+          icon={<Trash2 size={17} color="#fff" />}
+          iconBg={confirmClear ? WA.red : '#3b4a54'}
+          label={confirmClear ? 'Tap again to confirm clear' : 'Clear all logs'}
+          sublabel={confirmClear ? 'This cannot be undone' : 'Permanently delete all log entries from the database'}
+          onClick={handleClear}
+          danger={confirmClear}
+          last
+        />
+      </div>
+    </div>
+  )
+}
+
 // ─── Nav item (needs own state for hover) ───────────────────────
 function NavItem({ n, active, isMobile, onClick }) {
   const [h, setH] = useState(false)
@@ -669,8 +833,9 @@ const NAV = [
   { id: 'privacy',       icon: Lock,          label: 'Privacy',            color: '#6366f1' },
   { id: 'chats',         icon: MessageSquare, label: 'Chats',              color: '#f59e0b' },
   { id: 'notifications', icon: Bell,          label: 'Notifications',      color: '#25D366' },
+  { id: 'log_control',   icon: ScrollText,    label: 'Log Control',        color: '#06b6d4' },
   { id: 'shortcuts',     icon: Keyboard,      label: 'Keyboard shortcuts', color: '#8b5cf6' },
-  { id: 'help',          icon: HelpCircle,    label: 'Help',               color: '#06b6d4' },
+  { id: 'help',          icon: HelpCircle,    label: 'Help',               color: '#64748b' },
 ]
 
 const SECTION_COMPONENTS = {
@@ -679,6 +844,7 @@ const SECTION_COMPONENTS = {
   privacy: PrivacySection,
   chats: ChatsSection,
   notifications: NotificationsSection,
+  log_control: LogControlSection,
   shortcuts: ShortcutsSection,
   help: HelpSection,
 }
