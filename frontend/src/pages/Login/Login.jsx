@@ -4,7 +4,7 @@ import {
   QrCode, RefreshCw, Key, HelpCircle, Lock,
   MessageSquare, Zap, Cpu, Cloud, Smartphone, ChevronLeft
 } from 'lucide-react'
-import { whatsappApi } from '../../services/api'
+import { whatsappApi, healthApi } from '../../services/api'
 import { useApp } from '../../context/AppContext'
 import { getErrorMessage } from '../../utils/error'
 
@@ -48,6 +48,7 @@ export default function Login() {
   const [pairingCode, setPairingCode] = useState(null)
   const [message, setMessage] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
+  const [backendOk, setBackendOk] = useState(null) // null=checking, true, false
 
   // Redirect to dashboard as soon as WhatsApp is connected
   useEffect(() => {
@@ -55,6 +56,19 @@ export default function Login() {
       navigate('/dashboard')
     }
   }, [sessionStatus.status, navigate])
+
+  // Backend connectivity check
+  useEffect(() => {
+    let cancelled = false
+    const check = () => {
+      healthApi.check()
+        .then(() => { if (!cancelled) setBackendOk(true) })
+        .catch(() => { if (!cancelled) setBackendOk(false) })
+    }
+    check()
+    const iv = setInterval(check, 10000)
+    return () => { cancelled = true; clearInterval(iv) }
+  }, [])
 
   // Poll status while connecting
   useEffect(() => {
@@ -111,7 +125,12 @@ export default function Login() {
         await refreshSessionStatus()
       }
     } catch (err) {
-      setErrorMsg(getErrorMessage(err, 'Connection failed.'))
+      if (!err.response) {
+        setErrorMsg('Cannot reach the backend server. Make sure the service is running and try again.')
+        setBackendOk(false)
+      } else {
+        setErrorMsg(getErrorMessage(err, 'Connection failed.'))
+      }
     } finally {
       setConnecting(false)
     }
@@ -145,6 +164,14 @@ export default function Login() {
       {/* Ambient blobs */}
       <div style={{ position: 'absolute', width: 400, height: 400, background: 'rgba(37,211,102,0.08)', filter: 'blur(100px)', borderRadius: '50%', top: '10%', left: '10%', pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', width: 300, height: 300, background: 'rgba(139,92,246,0.08)', filter: 'blur(80px)', borderRadius: '50%', bottom: '10%', right: '10%', pointerEvents: 'none' }} />
+
+      {/* Backend status banner */}
+      {backendOk === false && (
+        <div style={{ position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 999, background: 'rgba(255,77,79,0.15)', border: '1px solid rgba(255,77,79,0.5)', borderRadius: 10, padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: '#ff4d4f', backdropFilter: 'blur(8px)', whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: 16 }}>⚠</span>
+          Backend server is not reachable — check that the service is running on port 7001
+        </div>
+      )}
 
       {/* ── SPLASH ── */}
       {view === 'splash' && (
