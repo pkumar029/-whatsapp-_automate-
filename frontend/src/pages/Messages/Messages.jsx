@@ -1366,7 +1366,18 @@ export default function Messages() {
       selectContact(chat.contact)
       return
     }
-    // Auto-create contact from bridge data when DB record doesn't exist
+    // Search DB first — avoid 409 when contact exists but wasn't loaded (e.g. wa_account mismatch)
+    try {
+      const res = await contactsApi.getAll({ search: chat.phone, limit: 10 })
+      const found = res.data?.contacts?.find(c => c.phone === chat.phone)
+      if (found) {
+        setContacts(prev => prev.find(c => c.id === found.id) ? prev : [...prev, found])
+        contactsMapRef.current = { ...contactsMapRef.current, [found.id]: found }
+        selectContact(found)
+        return
+      }
+    } catch {}
+    // Truly new contact — create it
     try {
       const res = await contactsApi.create({
         name: chat.name, phone: chat.phone,
@@ -1376,14 +1387,7 @@ export default function Messages() {
       setContacts(prev => [...prev, newContact])
       contactsMapRef.current = { ...contactsMapRef.current, [newContact.id]: newContact }
       selectContact(newContact)
-    } catch {
-      // Might already exist with same phone, try searching
-      try {
-        const res2 = await contactsApi.getAll({ search: chat.phone, limit: 1 })
-        const found = res2.data?.contacts?.[0]
-        if (found) { setContacts(prev => prev.find(c => c.id === found.id) ? prev : [...prev, found]); selectContact(found) }
-      } catch {}
-    }
+    } catch {}
   }, [selectContact])
 
   if (loadingSession) return (
