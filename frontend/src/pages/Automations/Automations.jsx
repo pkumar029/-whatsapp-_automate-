@@ -700,7 +700,7 @@ function AutomationModal({ automation, onClose, onSave }) {
               </div>
             )}
 
-            {(tt === 'contact_added' || tt === 'message_received' || tt === 'manual') && (
+            {(tt === 'contact_added' || tt === 'message_received') && (
               <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{triggerMeta.desc} — no additional configuration required.</div>
             )}
           </div>
