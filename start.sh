@@ -1,38 +1,21 @@
 #!/bin/bash
-# ─────────────────────────────────────────────────────────────
-#  WhatsApp Automate — Start Application
-#  Usage: ./start.sh
-# ─────────────────────────────────────────────────────────────
+# Start backend (port 8000) and WhatsApp bridge (port 3000)
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
-PI_IP=$(hostname -I | awk '{print $1}')
-
 mkdir -p "$APP_DIR/logs"
 
-echo "Starting WhatsApp Automate..."
-cd "$APP_DIR"
+echo "Starting WhatsApp bridge on port 3000..."
+cd "$APP_DIR/whatsapp-bridge"
+node index.js > "$APP_DIR/logs/bridge.log" 2>&1 &
+echo "Bridge PID: $!"
 
-# Stop any old instances first
-pm2 delete ecosystem.config.js 2>/dev/null || true
-
-# Start all services
-pm2 start ecosystem.config.js
-
-# Save process list (survives reboot)
-pm2 save
+echo "Starting backend on port 8000..."
+cd "$APP_DIR/backend"
+python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > "$APP_DIR/logs/backend.log" 2>&1 &
+echo "Backend PID: $!"
 
 echo ""
-pm2 list
-
+echo "Both services running. Logs in ./logs/"
+echo "  Backend : http://localhost:8000"
+echo "  Bridge  : http://localhost:3000"
 echo ""
-echo "================================================"
-echo " ✅ Application Running!"
-echo "================================================"
-echo ""
-echo "  App URL   :  http://$PI_IP"
-echo "  API Docs  :  http://$PI_IP:8000/docs"
-echo "  Bridge    :  http://localhost:3000/health"
-echo ""
-echo "  Logs      :  ./logs.sh"
-echo "  Stop      :  ./stop.sh"
-echo "  Restart   :  ./restart.sh"
-echo ""
+echo "To stop: kill \$(lsof -ti:8000) \$(lsof -ti:3000)"
