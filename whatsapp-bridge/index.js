@@ -73,15 +73,27 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
         console.log(`Client will request Pairing Code / verify login for: ${phoneForPairingCode} using method: ${linkMethod}`);
     }
     
-    // On Raspberry Pi (ARM), use system Chromium instead of Puppeteer's bundled Chrome
+    // Detect system Chrome/Chromium across Windows, Linux (Pi), macOS
     const chromiumPaths = [
+        // Windows — Chrome
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        process.env.LOCALAPPDATA + '\\Google\\Chrome\\Application\\chrome.exe',
+        // Windows — Edge (fallback)
+        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+        'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+        // Linux / Raspberry Pi
         '/usr/bin/chromium-browser',
         '/usr/bin/chromium',
+        '/usr/bin/google-chrome',
         '/snap/bin/chromium',
+        // macOS
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     ];
     const fs2 = require('fs');
-    const executablePath = chromiumPaths.find(p => fs2.existsSync(p)) || undefined;
-    if (executablePath) console.log(`Using system Chromium: ${executablePath}`);
+    const executablePath = chromiumPaths.find(p => p && fs2.existsSync(p)) || undefined;
+    if (executablePath) console.log(`Using system browser: ${executablePath}`);
+    else console.log('Using Puppeteer bundled Chromium');
 
     client = new Client({
         authStrategy: new LocalAuth({
