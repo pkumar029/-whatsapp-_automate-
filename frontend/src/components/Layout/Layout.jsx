@@ -1,14 +1,25 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Outlet, Link } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import Header from './Header'
 import MobileBottomNav from './MobileBottomNav'
+import KeyboardShortcutsModal from '../KeyboardShortcutsModal'
 import { useApp } from '../../context/AppContext'
+import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts'
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const { profile } = useApp()
+
+  const toggleHelp = useCallback(() => setShortcutsOpen(v => !v), [])
+  const focusSearch = useCallback(() => {
+    const el = document.querySelector('input[type="search"], input[placeholder*="earch"]')
+    el?.focus()
+  }, [])
+
+  useKeyboardShortcuts({ onToggleHelp: toggleHelp, onSearch: focusSearch })
 
   // Close sidebar drawer on resize to desktop
   useEffect(() => {
@@ -29,6 +40,7 @@ export default function Layout() {
 
   return (
     <div className={`app-layout${isCollapsed ? ' layout-collapsed' : ''}`}>
+      <KeyboardShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       {/* Sidebar overlay backdrop on mobile */}
       {sidebarOpen && (
         <div
