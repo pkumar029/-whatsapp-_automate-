@@ -9,7 +9,8 @@ from contextlib import asynccontextmanager
 
 from config.settings import settings
 from utils.helpers import setup_logging
-from database.connection import check_db_connection
+from database.connection import check_db_connection, engine
+from sqlalchemy import text as _sql
 
 # ─── Setup Logging ────────────────────────────────────────────
 setup_logging()
@@ -29,38 +30,28 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("⚠️  Database connection failed — check .env DB_ settings")
 
-    # Safe schema migration — add wa_account column if missing
-    try:
-        from database.connection import engine
-        from sqlalchemy import text as _text
-        with engine.connect() as _conn:
-            _conn.execute(_text(
-                "ALTER TABLE contacts ADD COLUMN wa_account VARCHAR(100) NULL"
-            ))
-            _conn.commit()
-        logger.info("✅ Migration: added wa_account column to contacts")
-    except Exception as _e:
-        if "Duplicate column" not in str(_e) and "already exists" not in str(_e).lower():
-            logger.warning(f"Migration note: {_e}")
-        # Column already exists — no action needed
-    
-    # Create system_settings table if it doesn't exist
-    try:
-        from sqlalchemy import text as _text2
-        with engine.connect() as _conn2:
-            _conn2.execute(_text2(
-                "CREATE TABLE IF NOT EXISTS system_settings ("
-                "  id INT AUTO_INCREMENT PRIMARY KEY,"
-                "  `key` VARCHAR(100) NOT NULL UNIQUE,"
-                "  value TEXT,"
-                "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
-                "  INDEX idx_sys_key (`key`)"
-                ")"
-            ))
-            _conn2.commit()
-        logger.info("✅ system_settings table ready")
-    except Exception as _e2:
-        logger.warning(f"system_settings migration note: {_e2}")
+    # Safe schema migrations
+    _migrations = [
+        ("wa_account column",
+         "ALTER TABLE contacts ADD COLUMN wa_account VARCHAR(100) NULL"),
+        ("system_settings table",
+         "CREATE TABLE IF NOT EXISTS system_settings ("
+         "  id INT AUTO_INCREMENT PRIMARY KEY,"
+         "  `key` VARCHAR(100) NOT NULL UNIQUE,"
+         "  value TEXT,"
+         "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
+         ")"),
+    ]
+    for _name, _sql_str in _migrations:
+        try:
+            with engine.connect() as _conn:
+                _conn.execute(_sql(_sql_str))
+                _conn.commit()
+            logger.info(f"✅ Migration OK: {_name}")
+        except Exception as _e:
+            _msg = str(_e)
+            if "Duplicate column" not in _msg and "already exists" not in _msg.lower():
+                logger.warning(f"Migration note ({_name}): {_msg}")
 
     # Start the queue worker background loop
     import asyncio
