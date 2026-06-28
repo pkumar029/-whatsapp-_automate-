@@ -175,35 +175,45 @@ function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
 
   return (
     <div style={{
-      background: 'var(--bg-tertiary)',
+      background: 'var(--bg-secondary)',
       border: `1px solid ${open ? meta.color : 'var(--border-primary)'}`,
+      borderLeft: `3px solid ${meta.color}`,
       borderRadius: 'var(--radius-md)',
       width: '100%',
       transition: 'border-color 0.2s',
+      overflow: 'hidden',
     }}>
+      {/* Header — always visible */}
       <div
-        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', cursor: 'pointer', borderBottom: open ? '1px solid var(--border-primary)' : 'none' }}
+        style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', cursor: 'pointer', borderBottom: open ? '1px solid var(--border-primary)' : 'none', background: open ? `${meta.color}06` : 'transparent' }}
         onClick={() => setOpen(!open)}
       >
-        <div style={{ width: 28, height: 28, borderRadius: 6, background: `${meta.color}22`, color: meta.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <Icon size={13} />
+        {/* Step number badge */}
+        <div style={{ width: 22, height: 22, borderRadius: '50%', background: meta.color, color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 10, fontWeight: 800 }}>
+          {index + 1}
+        </div>
+        {/* Icon + labels */}
+        <div style={{ width: 32, height: 32, borderRadius: 8, background: `${meta.color}20`, color: meta.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <Icon size={15} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>Step {index + 1}: {meta.label}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.3 }}>{meta.label}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary || 'Click to configure'}</div>
         </div>
-        <div style={{ display: 'flex', gap: 3 }} onClick={e => e.stopPropagation()}>
-          {index > 0 && <button type="button" className="btn btn-secondary btn-icon btn-sm" onClick={onMoveUp} style={{ width: 24, height: 24 }}><ChevronUp size={11} /></button>}
-          {index < totalSteps - 1 && <button type="button" className="btn btn-secondary btn-icon btn-sm" onClick={onMoveDown} style={{ width: 24, height: 24 }}><ChevronDown size={11} /></button>}
-          <button type="button" className="btn btn-danger btn-icon btn-sm" onClick={onDelete} style={{ width: 24, height: 24 }}><Trash2 size={11} /></button>
+        {/* Actions */}
+        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+          {index > 0 && <button type="button" className="btn btn-secondary btn-icon btn-sm" onClick={onMoveUp} title="Move up"><ChevronUp size={12} /></button>}
+          {index < totalSteps - 1 && <button type="button" className="btn btn-secondary btn-icon btn-sm" onClick={onMoveDown} title="Move down"><ChevronDown size={12} /></button>}
+          <button type="button" className="btn btn-danger btn-icon btn-sm" onClick={onDelete} title="Delete step"><Trash2 size={12} /></button>
         </div>
+        <ChevronDown size={14} style={{ color: 'var(--text-muted)', transform: open ? 'rotate(180deg)' : '', transition: 'transform 0.2s', flexShrink: 0 }} />
       </div>
 
       {open && (
-        <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12, background: 'var(--bg-tertiary)' }}>
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label" style={{ fontSize: 11 }}>Action Type</label>
-            <select className="form-input form-select" style={{ height: 32, fontSize: 12 }} value={step.step_type} onChange={e => {
+            <label className="form-label" style={{ fontSize: 12 }}>Action Type</label>
+            <select className="form-input form-select" style={{ height: 36, fontSize: 13 }} value={step.step_type} onChange={e => {
               const t = e.target.value
               const defaults = {
                 send_message: { message: '' },
@@ -226,14 +236,14 @@ function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
           {step.step_type === 'send_message' && (
             <>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: 11 }}>Message *</label>
+                <label className="form-label" style={{ fontSize: 12 }}>Message *</label>
                 <textarea className="form-input form-textarea" style={{ minHeight: 60, fontSize: 12, padding: 8 }}
                   value={config.message || ''} onChange={e => set('message', e.target.value)}
                   placeholder="Type your message... use {{name}} for contact name" />
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: 11 }}>Recipient</label>
-                <select className="form-input" style={{ height: 32, fontSize: 12 }}
+                <label className="form-label" style={{ fontSize: 12 }}>Recipient</label>
+                <select className="form-input" style={{ height: 36, fontSize: 13 }}
                   value={config.target_type === 'group' ? 'group' : (config.phone ? 'custom' : 'active')}
                   onChange={e => {
                     const m = e.target.value
@@ -249,8 +259,8 @@ function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
               {config.target_type === 'group' && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                   <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label" style={{ fontSize: 11 }}>Target Tag</label>
-                    <select className="form-input" style={{ height: 32, fontSize: 12 }} value={config.target_tag || 'all'} onChange={e => set('target_tag', e.target.value)}>
+                    <label className="form-label" style={{ fontSize: 12 }}>Target Tag</label>
+                    <select className="form-input" style={{ height: 36, fontSize: 13 }} value={config.target_tag || 'all'} onChange={e => set('target_tag', e.target.value)}>
                       <option value="all">All Contacts</option>
                       <option value="whatsapp_groups">All WA Groups</option>
                       <option value="leads">leads</option>
@@ -259,15 +269,15 @@ function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
                     </select>
                   </div>
                   <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label" style={{ fontSize: 11 }}>Stagger (s)</label>
-                    <input type="number" className="form-input" style={{ height: 32, fontSize: 12 }} min="0" value={config.stagger_seconds || 5} onChange={e => set('stagger_seconds', parseInt(e.target.value) || 0)} />
+                    <label className="form-label" style={{ fontSize: 12 }}>Stagger (s)</label>
+                    <input type="number" className="form-input" style={{ height: 36, fontSize: 13 }} min="0" value={config.stagger_seconds || 5} onChange={e => set('stagger_seconds', parseInt(e.target.value) || 0)} />
                   </div>
                 </div>
               )}
               {config.target_type !== 'group' && config.phone !== undefined && config.phone !== '' && (
                 <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label" style={{ fontSize: 11 }}>Phone Number</label>
-                  <input type="text" className="form-input" style={{ height: 32, fontSize: 12 }} value={config.phone || ''} onChange={e => set('phone', e.target.value)} placeholder="+91xxxxxxxxxx" />
+                  <label className="form-label" style={{ fontSize: 12 }}>Phone Number</label>
+                  <input type="text" className="form-input" style={{ height: 36, fontSize: 13 }} value={config.phone || ''} onChange={e => set('phone', e.target.value)} placeholder="+91xxxxxxxxxx" />
                 </div>
               )}
             </>
@@ -276,31 +286,31 @@ function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
           {step.step_type === 'send_image' && (
             <>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: 11 }}>Image URL *</label>
-                <input type="url" className="form-input" style={{ height: 32, fontSize: 12 }} value={config.image_url || ''} onChange={e => set('image_url', e.target.value)} placeholder="https://example.com/image.jpg" />
+                <label className="form-label" style={{ fontSize: 12 }}>Image URL *</label>
+                <input type="url" className="form-input" style={{ height: 36, fontSize: 13 }} value={config.image_url || ''} onChange={e => set('image_url', e.target.value)} placeholder="https://example.com/image.jpg" />
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: 11 }}>Caption</label>
-                <input type="text" className="form-input" style={{ height: 32, fontSize: 12 }} value={config.caption || ''} onChange={e => set('caption', e.target.value)} placeholder="Optional caption text" />
+                <label className="form-label" style={{ fontSize: 12 }}>Caption</label>
+                <input type="text" className="form-input" style={{ height: 36, fontSize: 13 }} value={config.caption || ''} onChange={e => set('caption', e.target.value)} placeholder="Optional caption text" />
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: 11 }}>Phone Number</label>
-                <input type="text" className="form-input" style={{ height: 32, fontSize: 12 }} value={config.phone || ''} onChange={e => set('phone', e.target.value)} placeholder="+91xxxxxxxxxx (leave blank = active contact)" />
+                <label className="form-label" style={{ fontSize: 12 }}>Phone Number</label>
+                <input type="text" className="form-input" style={{ height: 36, fontSize: 13 }} value={config.phone || ''} onChange={e => set('phone', e.target.value)} placeholder="+91xxxxxxxxxx (leave blank = active contact)" />
               </div>
             </>
           )}
 
           {(step.step_type === 'add_tag' || step.step_type === 'remove_tag') && (
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" style={{ fontSize: 11 }}>Tag Name *</label>
-              <input type="text" className="form-input" style={{ height: 32, fontSize: 12 }} value={config.tag || ''} onChange={e => set('tag', e.target.value)} placeholder="e.g. vip, lead, customer" />
+              <label className="form-label" style={{ fontSize: 12 }}>Tag Name *</label>
+              <input type="text" className="form-input" style={{ height: 36, fontSize: 13 }} value={config.tag || ''} onChange={e => set('tag', e.target.value)} placeholder="e.g. vip, lead, customer" />
               <span style={{ fontSize: 10, color: 'var(--text-muted)', display: 'block', marginTop: 4 }}>Applied to the contact who triggered this automation</span>
             </div>
           )}
 
           {step.step_type === 'react_message' && (
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" style={{ fontSize: 11 }}>Reaction Emoji *</label>
+              <label className="form-label" style={{ fontSize: 12 }}>Reaction Emoji *</label>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
                 {['👍', '❤️', '😂', '😮', '😢', '🙏', '✅', '🔥', '👏', '💯'].map(e => (
                   <button key={e} type="button"
@@ -315,8 +325,8 @@ function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
 
           {step.step_type === 'delay' && (
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" style={{ fontSize: 11 }}>Delay (seconds) *</label>
-              <input type="number" className="form-input" style={{ height: 32, fontSize: 12 }} min="1" value={config.seconds || 5} onChange={e => set('seconds', parseInt(e.target.value) || 1)} />
+              <label className="form-label" style={{ fontSize: 12 }}>Delay (seconds) *</label>
+              <input type="number" className="form-input" style={{ height: 36, fontSize: 13 }} min="1" value={config.seconds || 5} onChange={e => set('seconds', parseInt(e.target.value) || 1)} />
             </div>
           )}
 
@@ -327,15 +337,15 @@ function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
                 { k: 'operator', label: 'Operator', opts: [['equals','Equals'],['not_equals','Not Equals'],['contains','Contains'],['starts_with','Starts With'],['ends_with','Ends With']] },
               ].map(({ k, label, opts }) => (
                 <div key={k} className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label" style={{ fontSize: 11 }}>{label}</label>
-                  <select className="form-input form-select" style={{ height: 32, fontSize: 12 }} value={config[k] || opts[0][0]} onChange={e => set(k, e.target.value)}>
+                  <label className="form-label" style={{ fontSize: 12 }}>{label}</label>
+                  <select className="form-input form-select" style={{ height: 36, fontSize: 13 }} value={config[k] || opts[0][0]} onChange={e => set(k, e.target.value)}>
                     {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </select>
                 </div>
               ))}
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: 11 }}>Value</label>
-                <input type="text" className="form-input" style={{ height: 32, fontSize: 12 }} value={config.value || ''} onChange={e => set('value', e.target.value)} placeholder="e.g. Sales" />
+                <label className="form-label" style={{ fontSize: 12 }}>Value</label>
+                <input type="text" className="form-input" style={{ height: 36, fontSize: 13 }} value={config.value || ''} onChange={e => set('value', e.target.value)} placeholder="e.g. Sales" />
               </div>
             </div>
           )}
@@ -344,8 +354,8 @@ function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {[['name','Name'],['email','Email']].map(([k, l]) => (
                 <div key={k} className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label" style={{ fontSize: 11 }}>{l}</label>
-                  <input type="text" className="form-input" style={{ height: 32, fontSize: 12 }} value={config[k] || ''} onChange={e => set(k, e.target.value)} />
+                  <label className="form-label" style={{ fontSize: 12 }}>{l}</label>
+                  <input type="text" className="form-input" style={{ height: 36, fontSize: 13 }} value={config[k] || ''} onChange={e => set(k, e.target.value)} />
                 </div>
               ))}
             </div>
@@ -355,14 +365,14 @@ function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
             <>
               <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: 8 }}>
                 <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label" style={{ fontSize: 11 }}>Method</label>
-                  <select className="form-input form-select" style={{ height: 32, fontSize: 12 }} value={config.method || 'POST'} onChange={e => set('method', e.target.value)}>
+                  <label className="form-label" style={{ fontSize: 12 }}>Method</label>
+                  <select className="form-input form-select" style={{ height: 36, fontSize: 13 }} value={config.method || 'POST'} onChange={e => set('method', e.target.value)}>
                     {['POST','GET','PUT','PATCH'].map(m => <option key={m} value={m}>{m}</option>)}
                   </select>
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label" style={{ fontSize: 11 }}>URL *</label>
-                  <input type="url" className="form-input" style={{ height: 32, fontSize: 12 }} value={config.url || ''} onChange={e => set('url', e.target.value)} placeholder="https://hooks.example.com/..." />
+                  <label className="form-label" style={{ fontSize: 12 }}>URL *</label>
+                  <input type="url" className="form-input" style={{ height: 36, fontSize: 13 }} value={config.url || ''} onChange={e => set('url', e.target.value)} placeholder="https://hooks.example.com/..." />
                 </div>
               </div>
             </>
@@ -370,8 +380,8 @@ function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
 
           {step.step_type === 'log' && (
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" style={{ fontSize: 11 }}>Log Message *</label>
-              <input type="text" className="form-input" style={{ height: 32, fontSize: 12 }} value={config.message || ''} onChange={e => set('message', e.target.value)} />
+              <label className="form-label" style={{ fontSize: 12 }}>Log Message *</label>
+              <input type="text" className="form-input" style={{ height: 36, fontSize: 13 }} value={config.message || ''} onChange={e => set('message', e.target.value)} />
             </div>
           )}
         </div>
@@ -532,8 +542,8 @@ function AutomationModal({ automation, onClose, onSave }) {
 
             {tt === 'keyword' && (
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: 11 }}>Exact Keyword *</label>
-                <input className="form-input" style={{ height: 32, fontSize: 12 }} placeholder="e.g. hello" value={triggerKeyword} onChange={e => setTriggerKeyword(e.target.value)} />
+                <label className="form-label" style={{ fontSize: 12 }}>Exact Keyword *</label>
+                <input className="form-input" style={{ height: 36, fontSize: 13 }} placeholder="e.g. hello" value={triggerKeyword} onChange={e => setTriggerKeyword(e.target.value)} />
                 <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>Triggers when incoming message exactly matches this word (case-insensitive).</span>
               </div>
             )}
@@ -542,8 +552,8 @@ function AutomationModal({ automation, onClose, onSave }) {
               <>
                 <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 8 }}>
                   <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label" style={{ fontSize: 11 }}>Match Mode</label>
-                    <select className="form-input form-select" style={{ height: 32, fontSize: 12 }} value={patternMode} onChange={e => setPatternMode(e.target.value)}>
+                    <label className="form-label" style={{ fontSize: 12 }}>Match Mode</label>
+                    <select className="form-input form-select" style={{ height: 36, fontSize: 13 }} value={patternMode} onChange={e => setPatternMode(e.target.value)}>
                       <option value="contains">Contains</option>
                       <option value="starts_with">Starts With</option>
                       <option value="ends_with">Ends With</option>
@@ -551,8 +561,8 @@ function AutomationModal({ automation, onClose, onSave }) {
                     </select>
                   </div>
                   <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label" style={{ fontSize: 11 }}>Pattern *</label>
-                    <input className="form-input" style={{ height: 32, fontSize: 12 }} placeholder={patternMode === 'regex' ? '^order\\s+\\d+' : 'e.g. order'} value={triggerPattern} onChange={e => setTriggerPattern(e.target.value)} />
+                    <label className="form-label" style={{ fontSize: 12 }}>Pattern *</label>
+                    <input className="form-input" style={{ height: 36, fontSize: 13 }} placeholder={patternMode === 'regex' ? '^order\\s+\\d+' : 'e.g. order'} value={triggerPattern} onChange={e => setTriggerPattern(e.target.value)} />
                   </div>
                 </div>
                 <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, display: 'block' }}>Triggers when an incoming message matches the pattern (case-insensitive).</span>
@@ -571,24 +581,24 @@ function AutomationModal({ automation, onClose, onSave }) {
                 </div>
                 {scheduleBuilder.type !== 'custom' && scheduleBuilder.type !== 'daily' && (
                   <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label" style={{ fontSize: 11 }}>Every (value)</label>
-                    <input type="number" className="form-input" style={{ height: 32, fontSize: 12 }} min="1" value={scheduleBuilder.value}
+                    <label className="form-label" style={{ fontSize: 12 }}>Every (value)</label>
+                    <input type="number" className="form-input" style={{ height: 36, fontSize: 13 }} min="1" value={scheduleBuilder.value}
                       onChange={e => setScheduleBuilder(p => ({ ...p, value: Math.max(1, parseInt(e.target.value, 10) || 1) }))} />
                     <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>Runs every {scheduleBuilder.value} {scheduleBuilder.type}</span>
                   </div>
                 )}
                 {scheduleBuilder.type === 'daily' && (
                   <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label" style={{ fontSize: 11 }}>Time of Day</label>
-                    <input type="time" className="form-input" style={{ height: 32, fontSize: 12 }} value={scheduleBuilder.time}
+                    <label className="form-label" style={{ fontSize: 12 }}>Time of Day</label>
+                    <input type="time" className="form-input" style={{ height: 36, fontSize: 13 }} value={scheduleBuilder.time}
                       onChange={e => setScheduleBuilder(p => ({ ...p, time: e.target.value || '12:00' }))} />
                     <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>Runs every day at {scheduleBuilder.time}</span>
                   </div>
                 )}
                 {scheduleBuilder.type === 'custom' && (
                   <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label" style={{ fontSize: 11 }}>Cron Expression</label>
-                    <input className="form-input" style={{ height: 32, fontSize: 12 }} placeholder="*/5 * * * *" value={triggerCron} onChange={e => setTriggerCron(e.target.value)} />
+                    <label className="form-label" style={{ fontSize: 12 }}>Cron Expression</label>
+                    <input className="form-input" style={{ height: 36, fontSize: 13 }} placeholder="*/5 * * * *" value={triggerCron} onChange={e => setTriggerCron(e.target.value)} />
                     <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>Standard 5-field crontab format</span>
                   </div>
                 )}
@@ -597,8 +607,8 @@ function AutomationModal({ automation, onClose, onSave }) {
 
             {tt === 'contact_tag_added' && (
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: 11 }}>Tag (optional — blank = any tag)</label>
-                <input className="form-input" style={{ height: 32, fontSize: 12 }} placeholder="e.g. vip" value={triggerTag} onChange={e => setTriggerTag(e.target.value)} />
+                <label className="form-label" style={{ fontSize: 12 }}>Tag (optional — blank = any tag)</label>
+                <input className="form-input" style={{ height: 36, fontSize: 13 }} placeholder="e.g. vip" value={triggerTag} onChange={e => setTriggerTag(e.target.value)} />
               </div>
             )}
 
@@ -620,10 +630,13 @@ function AutomationModal({ automation, onClose, onSave }) {
           {/* Workflow canvas */}
           <div style={{ borderTop: '1px solid var(--border-primary)', paddingTop: 16, marginBottom: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>Workflow Steps</span>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={addStep}><Plus size={13} /> Add Step</button>
+              <div>
+                <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)' }}>Workflow Steps</span>
+                {steps.length > 0 && <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>{steps.length} step{steps.length !== 1 ? 's' : ''} — click a step to configure</span>}
+              </div>
+              <button type="button" className="btn btn-primary btn-sm" onClick={addStep}><Plus size={13} /> Add Step</button>
             </div>
-            <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-primary)', padding: 14, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
+            <div style={{ background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-primary)', padding: '16px 12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, maxHeight: 520, overflowY: 'auto' }}>
               {/* Trigger node */}
               <div style={{ background: `${triggerMeta.color}18`, border: `1px dashed ${triggerMeta.color}`, borderRadius: 'var(--radius-md)', padding: '10px 14px', width: '100%', display: 'flex', gap: 10, alignItems: 'center' }}>
                 <div style={{ width: 28, height: 28, borderRadius: '50%', background: triggerMeta.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
