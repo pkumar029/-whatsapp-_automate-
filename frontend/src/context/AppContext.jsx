@@ -86,19 +86,18 @@ export function AppProvider({ children }) {
 
       const newPhone = data.phone || null
 
-      // Detect account switch — different phone connected (works across page reloads)
+      // Detect account switch — different phone connected
+      // NOTE: prevPhoneRef is NOT cleared on disconnect so that connecting a
+      // different account AFTER a disconnect is still caught.
       if (newPhone && prevPhoneRef.current && newPhone !== prevPhoneRef.current) {
-        localStorage.removeItem('wa_last_sync')
-        localStorage.removeItem('wa_session_start')
+        // Clear all account-scoped caches so new account starts clean
+        const clearKeys = ['wa_last_sync', 'wa_session_start', 'wa_favourites', 'wa_pinned', 'wa_archived']
+        clearKeys.forEach(k => localStorage.removeItem(k))
         setAccountKey(k => k + 1)
       }
       if (newPhone) {
         prevPhoneRef.current = newPhone
         localStorage.setItem('wa_active_phone', newPhone)
-      } else if (!newPhone && prevPhoneRef.current) {
-        // Disconnected — clear stored phone so next connect is treated as fresh
-        localStorage.removeItem('wa_active_phone')
-        prevPhoneRef.current = null
       }
 
       // Auto-sync contacts when WhatsApp first becomes connected (fire-and-forget so navigation isn't blocked)
