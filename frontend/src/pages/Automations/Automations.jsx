@@ -186,7 +186,9 @@ function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
   return (
     <div style={{
       background: 'var(--bg-secondary)',
-      border: `1px solid ${open ? meta.color : 'var(--border-primary)'}`,
+      borderTop: `1px solid ${open ? meta.color : 'var(--border-primary)'}`,
+      borderRight: `1px solid ${open ? meta.color : 'var(--border-primary)'}`,
+      borderBottom: `1px solid ${open ? meta.color : 'var(--border-primary)'}`,
       borderLeft: `3px solid ${meta.color}`,
       borderRadius: 'var(--radius-md)',
       width: '100%',
