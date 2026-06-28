@@ -27,8 +27,10 @@ def get_contacts(
     query = db.query(Contact)
 
     if wa_account:
-        # Strict isolation: only contacts belonging to this WhatsApp account
-        query = query.filter(Contact.wa_account == wa_account)
+        # Account contacts + contacts with no account set (manually added / legacy records)
+        query = query.filter(
+            or_(Contact.wa_account == wa_account, Contact.wa_account.is_(None))
+        )
 
     if search:
         search_term = f"%{search}%"
@@ -119,7 +121,9 @@ def delete_contact(db: Session, contact_id: int) -> bool:
 def get_total_contacts(db: Session, wa_account: Optional[str] = None) -> int:
     query = db.query(func.count(Contact.id))
     if wa_account:
-        query = query.filter(Contact.wa_account == wa_account)
+        query = query.filter(
+            or_(Contact.wa_account == wa_account, Contact.wa_account.is_(None))
+        )
     return query.scalar() or 0
 
 

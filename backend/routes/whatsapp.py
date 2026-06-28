@@ -64,7 +64,7 @@ async def dev_connect(phone: str = "+91 9876543210", db: Session = Depends(get_d
 
 from pydantic import BaseModel
 from datetime import datetime
-from models.models import Message, MessageDirection, MessageStatus
+from models.models import Message, MessageDirection, MessageStatus, WhatsappSession, SessionStatus
 import logging
 logger = logging.getLogger(__name__)
 
@@ -91,9 +91,18 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
             contact_data = ContactCreate(name=name, phone=phone, tags=payload.tags)
             contact = contacts_service.create_contact(db, contact_data)
         else:
-            # If contact already exists but has a placeholder name, update it with the real name
+            needs_save = False
+            # Backfill wa_account if missing (legacy contact or created before account field existed)
+            if not contact.wa_account:
+                active_session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
+                if active_session:
+                    contact.wa_account = active_session.phone
+                    needs_save = True
+            # Update placeholder name with real name from WhatsApp
             if payload.name and (contact.name.startswith("WhatsApp User") or contact.name.startswith("Unnamed") or contact.name == contact.phone):
                 contact.name = payload.name
+                needs_save = True
+            if needs_save:
                 db.add(contact)
                 db.commit()
                 db.refresh(contact)
