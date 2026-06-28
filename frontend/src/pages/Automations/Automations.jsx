@@ -6,7 +6,7 @@ import {
   AlertCircle, CheckCircle, ToggleLeft, ToggleRight, FlaskConical,
   BookOpen, History, Timer
 } from 'lucide-react'
-import { automationsApi } from '../../services/api'
+import { automationsApi, contactsApi } from '../../services/api'
 import { formatIST } from '../../utils/date'
 import { getErrorMessage } from '../../utils/error'
 
@@ -150,9 +150,19 @@ const parseCron = (cronStr) => {
 // ─── Step Node ────────────────────────────────────────────────
 function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMoveDown, triggerType }) {
   const [open, setOpen] = useState(false)
+  const [contactSearch, setContactSearch] = useState('')
+  const [contactList, setContactList] = useState([])
+  const [contactDropOpen, setContactDropOpen] = useState(false)
   let config = {}
   try { config = typeof step.config === 'string' ? JSON.parse(step.config || '{}') : (step.config || {}) } catch { config = {} }
   const set = (k, v) => onUpdate({ ...step, config: { ...config, [k]: v } })
+
+  // Load contacts once when recipient mode switches to "contact"
+  useEffect(() => {
+    if (config.target_mode === 'contact' && contactList.length === 0) {
+      contactsApi.getAll({ limit: 200 }).then(r => setContactList(r.data?.contacts || [])).catch(() => {})
+    }
+  }, [config.target_mode])
 
   const meta = STEP_META[step.step_type] || STEP_META.log
   const Icon = meta.icon
@@ -251,18 +261,77 @@ function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label" style={{ fontSize: 12 }}>Recipient</label>
                 <select className="form-input" style={{ height: 36, fontSize: 13 }}
-                  value={config.target_type === 'group' ? 'group' : (config.phone ? 'custom' : 'active')}
+                  value={config.target_mode || (config.target_type === 'group' ? 'group' : (config.contact_id ? 'contact' : (config.phone ? 'custom' : 'active')))}
                   onChange={e => {
                     const m = e.target.value
-                    if (m === 'group') onUpdate({ ...step, config: { ...config, target_type: 'group', target_tag: 'all', stagger_seconds: 5, phone: '' } })
-                    else if (m === 'custom') onUpdate({ ...step, config: { ...config, target_type: 'single', phone: config.phone || '' } })
-                    else onUpdate({ ...step, config: { ...config, target_type: 'single', phone: '' } })
+                    if (m === 'group') onUpdate({ ...step, config: { ...config, target_mode: 'group', target_type: 'group', target_tag: 'all', stagger_seconds: 5, phone: '', contact_id: null } })
+                    else if (m === 'custom') onUpdate({ ...step, config: { ...config, target_mode: 'custom', target_type: 'single', phone: config.phone || '', contact_id: null } })
+                    else if (m === 'contact') onUpdate({ ...step, config: { ...config, target_mode: 'contact', target_type: 'single', phone: '', contact_id: null, contact_name: '' } })
+                    else onUpdate({ ...step, config: { ...config, target_mode: 'active', target_type: 'single', phone: '', contact_id: null } })
                   }}>
                   {!isScheduled && <option value="active">Active Contact (dynamic)</option>}
+                  <option value="contact">Pick a Contact</option>
                   <option value="custom">Custom Number (static)</option>
                   <option value="group">Group / Tag (broadcast)</option>
                 </select>
               </div>
+
+              {/* Pick a contact from list */}
+              {(config.target_mode === 'contact' || config.contact_id) && config.target_type !== 'group' && (
+                <div className="form-group" style={{ marginBottom: 0, position: 'relative' }}>
+                  <label className="form-label" style={{ fontSize: 12 }}>Search Contact</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    style={{ height: 36, fontSize: 13 }}
+                    value={config.contact_name || contactSearch}
+                    placeholder="Type name or phone..."
+                    onChange={e => {
+                      setContactSearch(e.target.value)
+                      setContactDropOpen(true)
+                      onUpdate({ ...step, config: { ...config, contact_name: e.target.value, contact_id: null, phone: '' } })
+                      if (contactList.length === 0) contactsApi.getAll({ limit: 200 }).then(r => setContactList(r.data?.contacts || [])).catch(() => {})
+                    }}
+                    onFocus={() => { setContactDropOpen(true); if (contactList.length === 0) contactsApi.getAll({ limit: 200 }).then(r => setContactList(r.data?.contacts || [])).catch(() => {}) }}
+                  />
+                  {config.contact_id && (
+                    <div style={{ marginTop: 4, fontSize: 12, color: 'var(--accent-primary)' }}>
+                      ✓ {config.contact_name} ({config.phone})
+                    </div>
+                  )}
+                  {contactDropOpen && !config.contact_id && (
+                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 999, background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-md)', maxHeight: 180, overflowY: 'auto', marginTop: 2, boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
+                      {contactList
+                        .filter(c => {
+                          const q = (config.contact_name || contactSearch || '').toLowerCase()
+                          return !q || c.name?.toLowerCase().includes(q) || c.phone?.includes(q)
+                        })
+                        .slice(0, 20)
+                        .map(c => (
+                          <div key={c.id}
+                            onMouseDown={e => {
+                              e.preventDefault()
+                              onUpdate({ ...step, config: { ...config, target_mode: 'contact', target_type: 'single', contact_id: c.id, contact_name: c.name, phone: c.phone } })
+                              setContactSearch('')
+                              setContactDropOpen(false)
+                            }}
+                            style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border-primary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-tertiary)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                          >
+                            <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>{c.name}</span>
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.phone}</span>
+                          </div>
+                        ))}
+                      {contactList.filter(c => { const q = (config.contact_name || contactSearch || '').toLowerCase(); return !q || c.name?.toLowerCase().includes(q) || c.phone?.includes(q) }).length === 0 && (
+                        <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--text-muted)' }}>No contacts found</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Group broadcast options */}
               {config.target_type === 'group' && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                   <div className="form-group" style={{ marginBottom: 0 }}>
@@ -281,7 +350,9 @@ function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
                   </div>
                 </div>
               )}
-              {config.target_type !== 'group' && config.phone !== undefined && config.phone !== '' && (
+
+              {/* Custom static number */}
+              {(config.target_mode === 'custom' || (!config.target_mode && config.phone && !config.contact_id)) && config.target_type !== 'group' && (
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label" style={{ fontSize: 12 }}>Phone Number</label>
                   <input type="text" className="form-input" style={{ height: 36, fontSize: 13 }} value={config.phone || ''} onChange={e => set('phone', e.target.value)} placeholder="+91xxxxxxxxxx" />
