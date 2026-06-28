@@ -38,7 +38,7 @@ export default function Login() {
 
   const [connectionType, setConnectionType] = useState('bridge')
   const [bridgeLinkMethod, setBridgeLinkMethod] = useState('qr') // qr | otp
-  const [phone, setPhone] = useState('')
+  const [phone, setPhone] = useState(() => localStorage.getItem('wa_last_phone') || '')
   const [metaToken, setMetaToken] = useState('')
   const [metaPhoneNumberId, setMetaPhoneNumberId] = useState('')
   const [metaBusinessAccountId, setMetaBusinessAccountId] = useState('')
@@ -86,6 +86,7 @@ export default function Login() {
     setErrorMsg('')
     setQrCode(null)
     setPairingCode(null)
+    if (phone) localStorage.setItem('wa_last_phone', phone)
 
     const config = {
       connection_type: connectionType,

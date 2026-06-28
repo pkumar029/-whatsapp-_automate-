@@ -118,7 +118,7 @@ function ConnectPanel({ onConnected }) {
   const { refreshSessionStatus } = useApp()
   const [step, setStep] = useState('form')
   const [method, setMethod] = useState('qr')
-  const [phone, setPhone] = useState('')
+  const [phone, setPhone] = useState(() => localStorage.getItem('wa_last_phone') || '')
   const [qrCode, setQrCode] = useState(null)
   const [pairingCode, setPairingCode] = useState(null)
   const [error, setError] = useState('')
@@ -142,6 +142,7 @@ function ConnectPanel({ onConnected }) {
   const submit = async (e) => {
     e.preventDefault(); setError(''); setStep('connecting')
     try {
+      if (phone) localStorage.setItem('wa_last_phone', phone)
       const r = await whatsappApi.connect({ connection_type: 'bridge', phone: phone || undefined, link_method: method })
       const d = r.data
       if (d?.qr) { setQrCode(d.qr); setStep('qr') }
@@ -224,7 +225,7 @@ function ConnectPanel({ onConnected }) {
 
 // ─── Section: Profile ────────────────────────────────────────────
 function ProfileSection() {
-  const { profile, updateProfile } = useApp()
+  const { profile, updateProfile, sessionStatus } = useApp()
   const fileRef = useRef()
   const [avatar, setAvatar] = useState(profile.avatar || null)
   const [name, setName] = useState(profile.name || '')
@@ -261,6 +262,12 @@ function ProfileSection() {
           <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatar} />
         </div>
         {saved && <div style={{ fontSize: 12, color: WA.green, display: 'flex', alignItems: 'center', gap: 4 }}><Check size={12} />{saved}</div>}
+        {sessionStatus.phone && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, background: 'rgba(37,211,102,0.08)', border: '1px solid rgba(37,211,102,0.2)', borderRadius: 20, padding: '4px 14px' }}>
+            <Phone size={12} color={WA.green} />
+            <span style={{ fontSize: 13, color: WA.green, fontFamily: 'monospace', fontWeight: 600 }}>{sessionStatus.phone}</span>
+          </div>
+        )}
       </div>
 
       {/* Name */}
