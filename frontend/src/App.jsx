@@ -13,7 +13,7 @@ import Login from './pages/Login/Login'
 import { useApp } from './context/AppContext'
 
 function ProtectedRoute() {
-  const { sessionStatus, loadingSession } = useApp()
+  const { sessionStatus, loadingSession, accountKey } = useApp()
 
   if (loadingSession) {
     return (
@@ -56,7 +56,7 @@ function App() {
         <Route path="login" element={<Login />} />
         
         <Route element={<ProtectedRoute />}>
-          <Route path="/" element={<Layout />}>
+          <Route path="/" element={<Layout key={accountKey} />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="automations" element={<Automations />} />

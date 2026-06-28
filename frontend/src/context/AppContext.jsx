@@ -73,13 +73,25 @@ export function AppProvider({ children }) {
 
   const [sessionStatus, setSessionStatus] = useState({ status: 'disconnected' })
   const [loadingSession, setLoadingSession] = useState(true)
+  const [accountKey, setAccountKey] = useState(0)
   const prevStatusRef = useRef('disconnected')
+  const prevPhoneRef = useRef(null)
 
   const refreshSessionStatus = useCallback(async () => {
     try {
       const res = await whatsappApi.getStatus()
       const data = res.data
       setSessionStatus(data)
+
+      const newPhone = data.phone || null
+
+      // Detect account switch — different phone connected
+      if (prevPhoneRef.current && newPhone && newPhone !== prevPhoneRef.current) {
+        localStorage.removeItem('wa_last_sync')
+        localStorage.removeItem('wa_session_start')
+        setAccountKey(k => k + 1)
+      }
+      if (newPhone) prevPhoneRef.current = newPhone
 
       // Auto-sync contacts when WhatsApp first becomes connected
       if (data.status === 'connected' && prevStatusRef.current !== 'connected') {
@@ -121,7 +133,8 @@ export function AppProvider({ children }) {
       sessionStatus,
       setSessionStatus,
       refreshSessionStatus,
-      loadingSession
+      loadingSession,
+      accountKey,
     }}>
       {children}
     </AppContext.Provider>
