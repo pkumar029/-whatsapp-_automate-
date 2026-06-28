@@ -93,6 +93,51 @@ async def run_now(automation_id: int, background_tasks: BackgroundTasks, db: Ses
     return {"success": True, "message": f"Automation '{name}' triggered"}
 
 
+@router.post("/{automation_id}/duplicate", status_code=201)
+async def duplicate_automation(automation_id: int, db: Session = Depends(get_db)):
+    """Duplicate an automation and all its steps."""
+    src = automations_service.get_automation_by_id(db, automation_id)
+    if not src:
+        raise HTTPException(status_code=404, detail="Automation not found")
+    from models.schemas import AutomationCreate, StepSchema
+    steps = [
+        StepSchema(step_type=s.step_type.value, step_order=s.step_order, name=s.name, config=s.config)
+        for s in sorted(src.steps, key=lambda x: x.step_order)
+    ]
+    copy_data = AutomationCreate(
+        name=f"{src.name} (copy)",
+        description=src.description,
+        trigger_type=src.trigger_type.value,
+        trigger_config=src.trigger_config,
+        steps=steps,
+    )
+    new_auto = automations_service.create_automation(db, copy_data)
+    return {"success": True, "id": new_auto.id, "name": new_auto.name}
+
+
+@router.post("/{automation_id}/webhook-trigger")
+async def webhook_trigger(automation_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """External systems can POST here to trigger a webhook_received automation."""
+    automation = automations_service.get_automation_by_id(db, automation_id)
+    if not automation:
+        raise HTTPException(status_code=404, detail="Automation not found")
+    if not automation.is_active:
+        raise HTTPException(status_code=400, detail="Automation is not active")
+
+    def _bg():
+        bg_db = SessionLocal()
+        try:
+            run_automation(bg_db, automation_id, {"trigger": "webhook_received"})
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Webhook trigger run failed: {e}")
+        finally:
+            bg_db.close()
+
+    background_tasks.add_task(_bg)
+    return {"success": True, "message": f"Automation '{automation.name}' triggered via webhook"}
+
+
 @router.get("/{automation_id}/steps")
 async def get_steps(automation_id: int, db: Session = Depends(get_db)):
     automation = automations_service.get_automation_by_id(db, automation_id)

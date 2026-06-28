@@ -40,14 +40,21 @@ class AutomationStatus(str, enum.Enum):
 
 class TriggerType(str, enum.Enum):
     keyword = "keyword"
+    keyword_pattern = "keyword_pattern"      # contains / regex match
     schedule = "schedule"
     contact_added = "contact_added"
+    contact_tag_added = "contact_tag_added"  # when a tag is applied to a contact
     message_received = "message_received"
+    webhook_received = "webhook_received"    # external HTTP POST
     manual = "manual"
 
 
 class StepType(str, enum.Enum):
     send_message = "send_message"
+    send_image = "send_image"        # send image via URL
+    add_tag = "add_tag"              # add tag to contact
+    remove_tag = "remove_tag"        # remove tag from contact
+    react_message = "react_message"  # react to triggering message
     delay = "delay"
     condition = "condition"
     update_contact = "update_contact"

@@ -1,0 +1,20 @@
+tunnel: 1e74a3b5-b882-4eab-9209-64a9b5505b5d
+credentials-file: /etc/cloudflared/1e74a3b5-b882-4eab-9209-64a9b5505b5d.json
+
+ingress:
+  - hostname: tamix.in
+    service: http://localhost:80
+
+  - hostname: mail.tamix.in
+    service: http://localhost:3000
+
+  - hostname: ssh.tamix.in
+    service: ssh://localhost:9890
+
+  - hostname: wa.tamix.in
+    service: http://localhost:5173
+
+  - hostname: wa-api.tamix.in
+    service: http://localhost:7001
+
+  - service: http_status:404

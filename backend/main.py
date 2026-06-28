@@ -41,6 +41,15 @@ async def lifespan(app: FastAPI):
          "  value TEXT,"
          "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
          ")"),
+        ("trigger_type enum expand",
+         "ALTER TABLE automations MODIFY COLUMN trigger_type "
+         "ENUM('keyword','keyword_pattern','schedule','contact_added',"
+         "'contact_tag_added','message_received','webhook_received','manual') "
+         "NOT NULL DEFAULT 'manual'"),
+        ("step_type enum expand",
+         "ALTER TABLE automation_steps MODIFY COLUMN step_type "
+         "ENUM('send_message','send_image','add_tag','remove_tag','react_message',"
+         "'delay','condition','update_contact','webhook','log') NOT NULL"),
     ]
     for _name, _sql_str in _migrations:
         try:

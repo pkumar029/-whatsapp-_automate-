@@ -180,6 +180,69 @@ def execute_step(db: Session, step: AutomationStep, context: Dict[str, Any]) -> 
                 db.flush()
         return context
 
+    elif step.step_type == StepType.send_image:
+        phone = context.get("phone") or config.get("phone")
+        image_url = config.get("image_url", "")
+        caption = config.get("caption", "")
+        if phone and image_url:
+            try:
+                import httpx as _httpx
+                from config.settings import settings as _s
+                _httpx.post(
+                    f"{_s.BRIDGE_URL}/send-media",
+                    json={"phone": phone, "mediaUrl": image_url, "caption": caption},
+                    timeout=15.0,
+                )
+                logger.info(f"Image sent to {phone}: {image_url}")
+            except Exception as e:
+                logger.error(f"Failed to send image to {phone}: {e}")
+        return context
+
+    elif step.step_type == StepType.add_tag:
+        contact_id = context.get("contact_id")
+        tag = config.get("tag", "").strip()
+        if contact_id and tag:
+            contact = db.query(Contact).filter(Contact.id == contact_id).first()
+            if contact:
+                tags = list(contact.tags or [])
+                if tag not in tags:
+                    tags.append(tag)
+                    contact.tags = tags
+                    db.flush()
+                logger.info(f"Added tag '{tag}' to contact {contact_id}")
+        return context
+
+    elif step.step_type == StepType.remove_tag:
+        contact_id = context.get("contact_id")
+        tag = config.get("tag", "").strip()
+        if contact_id and tag:
+            contact = db.query(Contact).filter(Contact.id == contact_id).first()
+            if contact:
+                tags = list(contact.tags or [])
+                if tag in tags:
+                    tags.remove(tag)
+                    contact.tags = tags
+                    db.flush()
+                logger.info(f"Removed tag '{tag}' from contact {contact_id}")
+        return context
+
+    elif step.step_type == StepType.react_message:
+        message_id = context.get("whatsapp_message_id")
+        emoji = config.get("emoji", "👍")
+        if message_id:
+            try:
+                import httpx as _httpx
+                from config.settings import settings as _s
+                _httpx.post(
+                    f"{_s.BRIDGE_URL}/react",
+                    json={"messageId": message_id, "emoji": emoji},
+                    timeout=5.0,
+                )
+                logger.info(f"Reacted to message {message_id} with {emoji}")
+            except Exception as e:
+                logger.warning(f"React failed: {e}")
+        return context
+
     elif step.step_type == StepType.log:
         log_message = config.get("message", "Automation step executed")
         logger.info(f"[Automation Log] {log_message}")
@@ -187,9 +250,18 @@ def execute_step(db: Session, step: AutomationStep, context: Dict[str, Any]) -> 
         return context
 
     elif step.step_type == StepType.webhook:
-        # Placeholder: in production, make HTTP request
         url = config.get("url", "")
-        logger.info(f"Webhook step: {url} (skipped in dev)")
+        method = config.get("method", "POST").upper()
+        headers = config.get("headers", {})
+        body = config.get("body", {})
+        if url:
+            try:
+                import httpx as _httpx
+                _r = _httpx.request(method, url, json={**body, **context} if isinstance(body, dict) else body, headers=headers, timeout=10.0)
+                logger.info(f"Webhook {method} {url} → {_r.status_code}")
+                context["webhook_status"] = _r.status_code
+            except Exception as e:
+                logger.error(f"Webhook failed: {e}")
         return context
 
     else:

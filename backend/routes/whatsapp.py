@@ -131,6 +131,27 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
                 if keyword and content.strip().lower() == keyword.strip().lower():
                     should_trigger = True
                     trigger_reason = f"keyword: {keyword}"
+            elif automation.trigger_type == TriggerType.keyword_pattern:
+                cfg = automation.trigger_config or {}
+                pattern = cfg.get("pattern", "")
+                mode = cfg.get("match_mode", "contains")
+                c_lower = content.strip().lower()
+                p_lower = pattern.strip().lower()
+                if pattern:
+                    import re as _re
+                    if mode == "contains":
+                        should_trigger = p_lower in c_lower
+                    elif mode == "starts_with":
+                        should_trigger = c_lower.startswith(p_lower)
+                    elif mode == "ends_with":
+                        should_trigger = c_lower.endswith(p_lower)
+                    elif mode == "regex":
+                        try:
+                            should_trigger = bool(_re.search(pattern, content, _re.IGNORECASE))
+                        except Exception:
+                            should_trigger = False
+                    if should_trigger:
+                        trigger_reason = f"pattern({mode}): {pattern}"
 
             if should_trigger:
                 logger.info(f"Triggering automation '{automation.name}' (ID: {automation.id}) via {trigger_reason}")
