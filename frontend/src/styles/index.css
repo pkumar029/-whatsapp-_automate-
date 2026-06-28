@@ -841,6 +841,11 @@ tr:hover td {
   to { opacity: 1; }
 }
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .modal {
   background: var(--bg-card);
   border: 1px solid var(--border-primary);
