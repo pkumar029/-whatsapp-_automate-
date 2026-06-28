@@ -53,7 +53,7 @@ def get_session_status(db: Session) -> dict:
     if connection_type == "bridge" and session.status in (SessionStatus.connecting, SessionStatus.connected):
         try:
             import httpx
-            r = httpx.get("http://localhost:3000/status", timeout=2.0)
+            r = httpx.get("http://localhost:7002/status", timeout=2.0)
             if r.status_code == 200:
                 bridge_data = r.json()
                 bridge_status = bridge_data.get("status")
@@ -185,12 +185,12 @@ def connect_whatsapp_with_config(db: Session, config: "WhatsAppConnectRequest") 
                 payload["phone"] = config.phone
             if config.link_method:
                 payload["linkMethod"] = config.link_method
-            r = httpx.post("http://localhost:3000/connect", json=payload, timeout=5.0)
+            r = httpx.post("http://localhost:7002/connect", json=payload, timeout=5.0)
             if r.status_code != 200:
                 raise Exception(f"Bridge server returned status code {r.status_code}")
                 
             # Immediately get bridge status to fetch any initial QR
-            r_status = httpx.get("http://localhost:3000/status", timeout=5.0)
+            r_status = httpx.get("http://localhost:7002/status", timeout=5.0)
             qr_base64 = None
             pairing_code = None
             if r_status.status_code == 200:
@@ -217,7 +217,7 @@ def connect_whatsapp_with_config(db: Session, config: "WhatsAppConnectRequest") 
         except Exception as e:
             logger.error(f"Failed to connect to bridge: {e}")
             session.status = SessionStatus.disconnected
-            session.error_message = f"Failed to connect to whatsapp-web.js bridge: ensure node server is running on port 3000. ({str(e)})"
+            session.error_message = f"Failed to connect to whatsapp-web.js bridge: ensure node server is running on port 7002. ({str(e)})"
             db.commit()
             raise Exception(session.error_message)
     else:
@@ -234,7 +234,7 @@ def disconnect_whatsapp(db: Session) -> dict:
         if connection_type == "bridge":
             import httpx
             try:
-                httpx.post("http://localhost:3000/disconnect", timeout=5.0)
+                httpx.post("http://localhost:7002/disconnect", timeout=5.0)
             except Exception as e:
                 logger.warning(f"Failed to notify bridge of disconnect: {e}")
                 
@@ -331,7 +331,7 @@ def send_whatsapp_message(db: Session, phone: str, message: str) -> dict:
                 "phone": phone,
                 "message": message
             }
-            r = httpx.post("http://localhost:3000/send", json=payload, timeout=15.0)
+            r = httpx.post("http://localhost:7002/send", json=payload, timeout=15.0)
             if r.status_code != 200:
                 res_data = r.json()
                 error_msg = res_data.get("error", "Unknown bridge error")

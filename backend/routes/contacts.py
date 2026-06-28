@@ -134,9 +134,10 @@ async def import_contacts(file: UploadFile = File(...), db: Session = Depends(ge
 @router.get("/chats")
 def get_whatsapp_chats(db: Session = Depends(get_db)):
     """Get real-time WhatsApp chat list (with last message + unread count) from bridge."""
+    from config.settings import settings
     try:
         import httpx
-        r = httpx.get("http://localhost:3000/chats", timeout=15.0)
+        r = httpx.get(f"{settings.BRIDGE_URL}/chats", timeout=15.0)
         if r.status_code != 200:
             return {"success": False, "chats": []}
         return r.json()
@@ -145,10 +146,11 @@ def get_whatsapp_chats(db: Session = Depends(get_db)):
 
 
 def _bridge(path, method="get", **kwargs):
+    from config.settings import settings
     import httpx
     fn = getattr(httpx, method)
     try:
-        r = fn(f"http://localhost:3000{path}", timeout=20.0, **kwargs)
+        r = fn(f"{settings.BRIDGE_URL}{path}", timeout=20.0, **kwargs)
         return r.json()
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -242,10 +244,11 @@ def get_group_members(contact_id: int, db: Session = Depends(get_db)):
     contact = contacts_service.get_contact_by_id(db, contact_id)
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
+    from config.settings import settings
     try:
         import httpx
         r = httpx.get(
-            "http://localhost:3000/group-members",
+            f"{settings.BRIDGE_URL}/group-members",
             params={"groupId": contact.phone},
             timeout=10.0
         )
@@ -257,13 +260,14 @@ def get_group_members(contact_id: int, db: Session = Depends(get_db)):
 @router.get("/{contact_id}/profile-pic")
 def get_profile_pic(contact_id: int, db: Session = Depends(get_db)):
     """Proxy request to WhatsApp bridge to get contact profile picture URL."""
+    from config.settings import settings
     contact = contacts_service.get_contact_by_id(db, contact_id)
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
     try:
         import httpx
         r = httpx.get(
-            "http://localhost:3000/profile-pic",
+            f"{settings.BRIDGE_URL}/profile-pic",
             params={"phone": contact.phone},
             timeout=8.0
         )

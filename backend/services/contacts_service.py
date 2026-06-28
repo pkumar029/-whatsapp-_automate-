@@ -157,7 +157,8 @@ def sync_whatsapp_contacts(db: Session) -> dict:
     elif connection_type == "bridge":
         import httpx
         try:
-            r = httpx.get("http://localhost:3000/contacts", timeout=30.0)
+            from config.settings import settings
+            r = httpx.get(f"{settings.BRIDGE_URL}/contacts", timeout=30.0)
             if r.status_code != 200:
                 raise Exception(f"Bridge returned status {r.status_code}: {r.text[:200]}")
 

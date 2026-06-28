@@ -1,7 +1,7 @@
 // API Service — WhatsApp Automate Frontend
 import axios from 'axios'
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:7001/api/v1'
 
 // ─── Axios Instance ─────────────────────────────────────────
 const api = axios.create({
@@ -97,7 +97,7 @@ export const logsApi = {
 
 // ─── Health API ───────────────────────────────────────────────
 export const healthApi = {
-  check: () => api.get('/health', { baseURL: 'http://localhost:8000' }),
+  check: () => api.get('/health', { baseURL: 'http://localhost:7001' }),
 }
 
 // ─── Campaigns & Queue API ─────────────────────────────────────

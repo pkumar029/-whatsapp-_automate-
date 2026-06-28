@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:5173"
     CORS_ORIGINS: str = "*"
 
+    # WhatsApp Bridge internal URL
+    BRIDGE_URL: str = "http://localhost:7002"
+
     # Database
     DB_HOST: str = "localhost"
     DB_PORT: int = 3306
