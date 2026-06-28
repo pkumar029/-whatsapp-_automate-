@@ -1,5 +1,4 @@
 #!/bin/bash
-# Start backend (port 8000) and WhatsApp bridge (port 3000)
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$APP_DIR/logs"
 
@@ -10,7 +9,7 @@ echo "Bridge PID: $!"
 
 echo "Starting backend on port 8000..."
 cd "$APP_DIR/backend"
-python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > "$APP_DIR/logs/backend.log" 2>&1 &
+"$APP_DIR/venv/bin/python" -m uvicorn main:app --host 0.0.0.0 --port 8000 > "$APP_DIR/logs/backend.log" 2>&1 &
 echo "Backend PID: $!"
 
 echo ""
