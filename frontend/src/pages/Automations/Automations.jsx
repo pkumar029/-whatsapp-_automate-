@@ -853,6 +853,23 @@ function AutomationCard({ automation, onEdit, onDelete, onToggle, onRun, onDupli
   )
 }
 
+function stepSummaryText(step) {
+  const c = step.config || {}
+  switch (step.step_type) {
+    case 'send_message': return `Send: "${(c.message || '').slice(0, 55)}${(c.message || '').length > 55 ? '…' : ''}"`
+    case 'send_image':   return `Send image${c.caption ? `: "${c.caption}"` : ''}`
+    case 'add_tag':      return `Add tag: ${c.tag || '(unset)'}`
+    case 'remove_tag':   return `Remove tag: ${c.tag || '(unset)'}`
+    case 'react_message':return `React with ${c.emoji || '👍'}`
+    case 'delay':        return `Wait ${c.seconds || 0}s`
+    case 'condition':    return `If ${c.field || 'field'} ${c.operator || 'equals'} "${c.value || ''}"`
+    case 'update_contact': return 'Update contact fields'
+    case 'webhook':      return `Webhook ${c.method || 'POST'} ${(c.url || '').slice(0, 40)}`
+    case 'log':          return `Log: "${(c.message || '').slice(0, 50)}"`
+    default:             return step.step_type
+  }
+}
+
 // ─── Templates Modal ──────────────────────────────────────────
 function TemplatesModal({ onClose, onInstall }) {
   const [installing, setInstalling] = useState(null)
@@ -886,12 +903,24 @@ function TemplatesModal({ onClose, onInstall }) {
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{tpl.description}</div>
                 </div>
               </div>
+              {/* Trigger + cooldown badges */}
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 <span style={{ background: `${TRIGGER_META[tpl.trigger_type]?.color || 'var(--accent-primary)'}18`, color: TRIGGER_META[tpl.trigger_type]?.color || 'var(--accent-primary)', border: `1px solid ${TRIGGER_META[tpl.trigger_type]?.color || 'var(--accent-primary)'}33`, borderRadius: 4, padding: '2px 7px', fontSize: 10, fontWeight: 700 }}>
                   {TRIGGER_META[tpl.trigger_type]?.label || tpl.trigger_type}
                 </span>
-                <span className="badge badge-gray">{tpl.steps.length} steps</span>
                 {tpl.cooldown_minutes > 0 && <span className="badge badge-gray">{tpl.cooldown_minutes}m cooldown</span>}
+              </div>
+
+              {/* Plain-text step list */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {tpl.steps.map((s, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                    <span style={{ minWidth: 18, height: 18, borderRadius: '50%', background: STEP_META[s.step_type]?.color ? `${STEP_META[s.step_type].color}22` : 'var(--bg-secondary)', color: STEP_META[s.step_type]?.color || 'var(--text-muted)', fontSize: 10, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>
+                      {i + 1}
+                    </span>
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.4 }}>{stepSummaryText(s)}</span>
+                  </div>
+                ))}
               </div>
               <button
                 className="btn btn-primary btn-sm"
