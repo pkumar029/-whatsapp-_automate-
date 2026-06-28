@@ -12,6 +12,7 @@ import {
 import { whatsappApi, logsApi } from '../../services/api'
 import { useApp } from '../../context/AppContext'
 import { formatIST } from '../../utils/date'
+import { getBrowserInfo, getSessionStart } from '../../utils/browser'
 import { getErrorMessage } from '../../utils/error'
 
 // ─── Palette ────────────────────────────────────────────────────
@@ -312,6 +313,21 @@ function ProfileSection() {
   )
 }
 
+// ─── Browser icon helper ─────────────────────────────────────────
+function BrowserIcon({ browser, size = 20 }) {
+  const icons = {
+    'Google Chrome':    '🌐',
+    'Microsoft Edge':   '🔷',
+    'Mozilla Firefox':  '🦊',
+    'Safari':           '🧭',
+    'Opera':            '🅾️',
+    'Samsung Browser':  '📱',
+    'Chromium':         '🌐',
+  }
+  const emoji = icons[browser] || '🌐'
+  return <span style={{ fontSize: size }}>{emoji}</span>
+}
+
 // ─── Section: Account ────────────────────────────────────────────
 function AccountSection() {
   const { sessionStatus, refreshSessionStatus } = useApp()
@@ -319,6 +335,8 @@ function AccountSection() {
   const [showConnect, setShowConnect] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
   const [secNotif, setSecNotif] = useState(true)
+  const browserInfo = getBrowserInfo()
+  const sessionStart = getSessionStart()
 
   useEffect(() => {
     whatsappApi.getStatus().then(r => setWaStatus(r.data)).catch(() => { })
@@ -369,6 +387,28 @@ function AccountSection() {
             <ConnectPanel onConnected={async () => { setShowConnect(false); const r = await whatsappApi.getStatus(); setWaStatus(r.data) }} />
           </div>
         )}
+      </div>
+
+      {/* Active browser session */}
+      <SecLabel>Active Session</SecLabel>
+      <div style={{ margin: '4px 20px 12px', borderRadius: 12, overflow: 'hidden', border: `1px solid ${WA.border}`, background: WA.row }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', borderBottom: `1px solid ${WA.border}` }}>
+          <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(99,102,241,.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <BrowserIcon browser={browserInfo.browser} size={22} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: WA.text }}>
+              {browserInfo.browser}{browserInfo.version ? ` ${browserInfo.version}` : ''}
+            </div>
+            <div style={{ fontSize: 12, color: WA.sub, marginTop: 2 }}>
+              {browserInfo.os} · {browserInfo.device}
+            </div>
+          </div>
+          <span style={{ background: 'rgba(37,211,102,.15)', color: WA.green, borderRadius: 20, padding: '2px 10px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>THIS DEVICE</span>
+        </div>
+        <div style={{ padding: '10px 16px', fontSize: 12, color: WA.sub }}>
+          Session started · {sessionStart.toLocaleString()}
+        </div>
       </div>
 
       {/* Account rows */}
