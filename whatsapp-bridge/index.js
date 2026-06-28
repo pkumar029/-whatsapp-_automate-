@@ -73,13 +73,24 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
         console.log(`Client will request Pairing Code / verify login for: ${phoneForPairingCode} using method: ${linkMethod}`);
     }
     
+    // On Raspberry Pi (ARM), use system Chromium instead of Puppeteer's bundled Chrome
+    const chromiumPaths = [
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+        '/snap/bin/chromium',
+    ];
+    const fs2 = require('fs');
+    const executablePath = chromiumPaths.find(p => fs2.existsSync(p)) || undefined;
+    if (executablePath) console.log(`Using system Chromium: ${executablePath}`);
+
     client = new Client({
         authStrategy: new LocalAuth({
             dataPath: './.wwebjs_auth'
         }),
         puppeteer: {
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            executablePath,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
         }
     });
 
