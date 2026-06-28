@@ -1040,7 +1040,23 @@ export default function Messages() {
     } catch {}
   }, [sessionStatus.status, selectedContact, notify, fetchMessages])
 
-  useEffect(() => { fetchContacts() }, [])
+  // Pre-load lastMessages from DB on mount so sort order is correct immediately
+  const preloadLastMessages = useCallback(async () => {
+    try {
+      const res = await messagesApi.getAll({ limit: 500 })
+      const msgs = res.data?.messages || []
+      const lm = {}
+      msgs.forEach(m => {
+        if (!m.contact_id) return
+        if (!lm[m.contact_id] || new Date(m.created_at) > new Date(lm[m.contact_id].time)) {
+          lm[m.contact_id] = { content: m.content, time: m.created_at, direction: m.direction }
+        }
+      })
+      setLastMessages(prev => ({ ...lm, ...prev }))  // SSE/bridge updates already in prev take priority
+    } catch {}
+  }, [])
+
+  useEffect(() => { fetchContacts(); preloadLastMessages() }, [])
   useEffect(() => { fetchMessages(); const iv = setInterval(fetchMessages, 5000); return () => clearInterval(iv) }, [selectedContact])
   useEffect(() => {
     if (sessionStatus.status !== 'connected') return
@@ -1262,45 +1278,43 @@ export default function Messages() {
     contacts.forEach(c => { phoneToContact[c.phone] = c })
 
     if (bridgeChats.length > 0) {
-      // Bridge chats as primary; annotate with DB contact
       const bridgePhones = new Set(bridgeChats.map(c => c.phone))
-      // Add DB-only contacts not in bridge (manually added)
+      // DB-only contacts not seen in bridge at all (manually added, no WhatsApp chat yet)
       const dbOnly = contacts
         .filter(c => !bridgePhones.has(c.phone))
         .map(c => ({
           id: c.id, name: c.name, phone: c.phone,
           isGroup: c.tags?.includes('Group'),
           lastMessage: lastMessages[c.id]?.content || '',
-          lastMessageTime: lastMessages[c.id]?.time || c.created_at,
+          lastMessageTime: lastMessages[c.id]?.time || null,  // no fallback — no messages → sort to bottom
           lastMessageFromMe: lastMessages[c.id]?.direction === 'outbound',
           lastMessageType: 'chat', lastMessageAuthor: null,
           unreadCount: unreadContacts.has(c.id) ? 1 : 0,
           pinned: false, archived: false, participantCount: 0,
           contact: c, dbOnly: true,
         }))
-      const bridgeMapped = bridgeChats
-        .filter(chat => phoneToContact[chat.phone])
-        .map(chat => {
-          const dbContact = phoneToContact[chat.phone]
-          return {
-            ...chat,
-            contact: dbContact,
-            id: dbContact.id,
-            name: dbContact.name || chat.name,
-            unreadCount: chat.unreadCount || (unreadContacts.has(dbContact.id) ? 1 : 0),
-            pinned: pinnedByUser.has(dbContact.id) || chat.pinned,
-            archived: archivedByUser.has(dbContact.id) || chat.archived,
-          }
-        })
+      // ALL bridge chats — including senders not yet in DB (they auto-create on click)
+      const bridgeMapped = bridgeChats.map(chat => {
+        const dbContact = phoneToContact[chat.phone]
+        return {
+          ...chat,
+          contact: dbContact || null,
+          id: dbContact ? dbContact.id : chat.phone,  // phone string as key when no DB record yet
+          name: dbContact ? (dbContact.name || chat.name) : chat.name,
+          unreadCount: chat.unreadCount || (dbContact && unreadContacts.has(dbContact.id) ? 1 : 0),
+          pinned: (dbContact && pinnedByUser.has(dbContact.id)) || chat.pinned,
+          archived: (dbContact && archivedByUser.has(dbContact.id)) || chat.archived,
+        }
+      })
       return [...bridgeMapped, ...dbOnly]
     }
 
-    // Fallback: DB contacts only
+    // Fallback: DB contacts only (bridge not available)
     return contacts.map(c => ({
       id: c.id, name: c.name, phone: c.phone,
       isGroup: c.tags?.includes('Group'),
       lastMessage: lastMessages[c.id]?.content || '',
-      lastMessageTime: lastMessages[c.id]?.time || c.created_at,
+      lastMessageTime: lastMessages[c.id]?.time || null,  // no fallback — no messages → sort to bottom
       lastMessageFromMe: lastMessages[c.id]?.direction === 'outbound',
       lastMessageType: 'chat', lastMessageAuthor: null,
       unreadCount: unreadContacts.has(c.id) ? 1 : 0,
