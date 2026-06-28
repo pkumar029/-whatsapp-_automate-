@@ -93,16 +93,14 @@ export function AppProvider({ children }) {
       }
       if (newPhone) prevPhoneRef.current = newPhone
 
-      // Auto-sync contacts when WhatsApp first becomes connected
+      // Auto-sync contacts when WhatsApp first becomes connected (fire-and-forget so navigation isn't blocked)
       if (data.status === 'connected' && prevStatusRef.current !== 'connected') {
         prevStatusRef.current = 'connected'
         const lastSync = localStorage.getItem('wa_last_sync')
         const now = Date.now()
         if (!lastSync || now - parseInt(lastSync, 10) > 30 * 60 * 1000) {
-          try {
-            await contactsApi.sync()
-            localStorage.setItem('wa_last_sync', String(now))
-          } catch {}
+          localStorage.setItem('wa_last_sync', String(now))
+          contactsApi.sync().catch(() => {})
         }
       } else if (data.status !== 'connected') {
         prevStatusRef.current = data.status
