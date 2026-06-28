@@ -81,10 +81,10 @@ dist-ssr/
 *.local
 
 # ─── Logs ─────────────────────────────────────
-logs/
+/logs/
 *.log
 *.log.*
-log/
+/log/
 backend/logs/
 whatsapp_session.log
 
