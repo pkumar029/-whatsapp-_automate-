@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useRef } from 'react'
+import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react'
 import { whatsappApi, contactsApi } from '../services/api'
 
 const AppContext = createContext()
@@ -75,7 +75,7 @@ export function AppProvider({ children }) {
   const [loadingSession, setLoadingSession] = useState(true)
   const prevStatusRef = useRef('disconnected')
 
-  const refreshSessionStatus = async () => {
+  const refreshSessionStatus = useCallback(async () => {
     try {
       const res = await whatsappApi.getStatus()
       const data = res.data
@@ -102,7 +102,7 @@ export function AppProvider({ children }) {
     } finally {
       setLoadingSession(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
     refreshSessionStatus()

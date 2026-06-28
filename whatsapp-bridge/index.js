@@ -219,7 +219,7 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
             console.log(`Inbound message from ${name} (${phone}): ${msg.body}`);
             const content = msg.body;
             
-            await fetch('http://localhost:8000/api/v1/whatsapp/webhook', {
+            await fetch('http://localhost:7001/api/v1/whatsapp/webhook', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ phone, content, name, tags })

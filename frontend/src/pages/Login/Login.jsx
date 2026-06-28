@@ -267,7 +267,7 @@ export default function Login() {
 
               <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
                 <HelpCircle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
-                <span>Requires the whatsapp-bridge Node process running on port 3000.</span>
+                <span>Requires the whatsapp-bridge Node process running on port 7002.</span>
               </div>
 
               <button type="submit" className="btn btn-primary" disabled={connecting} style={{ height: 40 }}>

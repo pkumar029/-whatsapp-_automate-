@@ -97,7 +97,7 @@ export const logsApi = {
 
 // ─── Health API ───────────────────────────────────────────────
 export const healthApi = {
-  check: () => api.get('/health', { baseURL: 'http://localhost:7001' }),
+  check: () => api.get('/health'),
 }
 
 // ─── Campaigns & Queue API ─────────────────────────────────────

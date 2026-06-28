@@ -53,7 +53,7 @@ def get_session_status(db: Session) -> dict:
     if connection_type == "bridge" and session.status in (SessionStatus.connecting, SessionStatus.connected):
         try:
             import httpx
-            r = httpx.get("http://localhost:7002/status", timeout=2.0)
+            r = httpx.get("http://localhost:7002/status", timeout=5.0)
             if r.status_code == 200:
                 bridge_data = r.json()
                 bridge_status = bridge_data.get("status")
@@ -62,21 +62,12 @@ def get_session_status(db: Session) -> dict:
                 
                 # Update DB state based on bridge state
                 if bridge_status == "connected":
-                    was_connecting = (session.status == SessionStatus.connecting)
                     session.status = SessionStatus.connected
                     session.phone = bridge_data.get("phone")
                     session.connected_at = datetime.utcnow()
                     session.qr_code = None
                     session.error_message = None
                     db.commit()
-                    
-                    if was_connecting:
-                        logger.info("WhatsApp session successfully connected. Triggering auto contact sync...")
-                        try:
-                            from services import contacts_service
-                            contacts_service.sync_whatsapp_contacts(db)
-                        except Exception as sync_err:
-                            logger.error(f"Failed to auto-sync contacts on connection: {sync_err}")
                 elif bridge_status == "connecting":
                     session.qr_code = bridge_data.get("qr")
                     if bridge_error:
