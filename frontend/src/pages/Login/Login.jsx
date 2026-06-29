@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  QrCode, RefreshCw, Key, HelpCircle, Lock,
+  RefreshCw, Key, HelpCircle, Lock,
   MessageSquare, Zap, Cpu, Cloud, Smartphone, ChevronLeft
 } from 'lucide-react'
 import { whatsappApi, healthApi } from '../../services/api'
@@ -37,14 +37,12 @@ export default function Login() {
   const [view, setView] = useState('splash')
 
   const [connectionType, setConnectionType] = useState('bridge')
-  const [bridgeLinkMethod, setBridgeLinkMethod] = useState('qr') // qr | otp
   const [phone, setPhone] = useState(() => localStorage.getItem('wa_last_phone') || '')
   const [metaToken, setMetaToken] = useState('')
   const [metaPhoneNumberId, setMetaPhoneNumberId] = useState('')
   const [metaBusinessAccountId, setMetaBusinessAccountId] = useState('')
 
   const [connecting, setConnecting] = useState(false)
-  const [clearingSession, setClearingSession] = useState(false)
   const [qrCode, setQrCode] = useState(null)
   const [pairingCode, setPairingCode] = useState(null)
   const [message, setMessage] = useState('')
@@ -113,18 +111,6 @@ export default function Login() {
     setErrorMsg('')
   }
 
-  const handleSwitchAccount = async () => {
-    setClearingSession(true)
-    setErrorMsg('')
-    try {
-      await whatsappApi.clearSession()
-    } catch {
-      // ignore — session files may already be absent
-    } finally {
-      setClearingSession(false)
-    }
-  }
-
   const handleConnect = async (e) => {
     if (e) e.preventDefault()
     setConnecting(true)
@@ -137,7 +123,7 @@ export default function Login() {
     const config = {
       connection_type: connectionType,
       phone: phone || undefined,
-      link_method: connectionType === 'bridge' ? bridgeLinkMethod : undefined,
+      link_method: connectionType === 'bridge' ? 'otp' : undefined,
       meta_token: connectionType === 'meta' ? metaToken : undefined,
       meta_phone_number_id: connectionType === 'meta' ? metaPhoneNumberId : undefined,
       meta_business_account_id: connectionType === 'meta' ? metaBusinessAccountId : undefined
@@ -247,18 +233,7 @@ export default function Login() {
             ))}
           </div>
 
-          <div style={{ marginTop: 20, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {/* Switch account — wipes saved session so next connect requires new QR */}
-            <button
-              className="switch-account-btn"
-              onClick={handleSwitchAccount}
-              disabled={clearingSession}
-            >
-              {clearingSession
-                ? <><RefreshCw size={13} style={{ animation: 'spin 1s linear infinite' }} /> Clearing session...</>
-                : '⇄ Use a different WhatsApp number'}
-            </button>
-
+          <div style={{ marginTop: 20, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 16 }}>
             <button className="btn btn-secondary" onClick={() => setView('splash')} style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', color: 'var(--text-secondary)' }}>
               <ChevronLeft size={14} /> Back
             </button>
@@ -292,42 +267,14 @@ export default function Login() {
           {/* ── BRIDGE FORM ── */}
           {connectionType === 'bridge' && (
             <form onSubmit={handleConnect} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div
-                  className={`link-method-card ${bridgeLinkMethod === 'qr' ? 'active' : ''}`}
-                  onClick={() => setBridgeLinkMethod('qr')}
-                >
-                  <div className="link-method-icon-container"><QrCode size={18} /></div>
-                  <div style={{ flex: 1, textAlign: 'left' }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>Scan QR Code</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Link instantly using your phone's camera</div>
-                  </div>
-                  <div className="link-method-radio"><div className="link-method-radio-inner" /></div>
-                </div>
-
-                <div
-                  className={`link-method-card ${bridgeLinkMethod === 'otp' ? 'active' : ''}`}
-                  onClick={() => setBridgeLinkMethod('otp')}
-                >
-                  <div className="link-method-icon-container"><Key size={18} /></div>
-                  <div style={{ flex: 1, textAlign: 'left' }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>Pairing Code (OTP)</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Link using an 8-character pairing code</div>
-                  </div>
-                  <div className="link-method-radio"><div className="link-method-radio-inner" /></div>
-                </div>
-              </div>
-
               <div className="form-group">
                 <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
-                  {bridgeLinkMethod === 'qr'
-                    ? 'Verification Phone Number * (must match scanned account, with country code: +91xxxxxx)'
-                    : 'WhatsApp Phone Number * (to generate pairing code, with country code: +91xxxxxx)'}
+                  WhatsApp Phone Number * (with country code, e.g. +91xxxxxxxxxx)
                 </label>
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="+91xxxxxx"
+                  placeholder="+91xxxxxxxxxx"
                   value={phone}
                   onChange={e => setPhone(e.target.value)}
                   required
@@ -337,11 +284,11 @@ export default function Login() {
 
               <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
                 <HelpCircle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
-                <span>Requires the whatsapp-bridge Node process running on port 7002.</span>
+                <span>An 8-character pairing code will be generated. Enter it in WhatsApp → Linked Devices → Link with phone number instead.</span>
               </div>
 
               <button type="submit" className="btn btn-primary" disabled={connecting} style={{ height: 40 }}>
-                {connecting ? <><RefreshCw size={15} style={{ animation: 'spin 1s linear infinite' }} /> Starting...</> : 'Link WhatsApp Account'}
+                {connecting ? <><RefreshCw size={15} style={{ animation: 'spin 1s linear infinite' }} /> Starting...</> : 'Get Pairing Code'}
               </button>
             </form>
           )}
@@ -494,19 +441,6 @@ export default function Login() {
         .method-card:hover { border-color: var(--accent-primary); }
         .method-icon { width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: center; color: var(--accent-primary); flex-shrink: 0; }
 
-        .link-method-card { border: 1px solid var(--border-primary); background: rgba(255,255,255,0.02); border-radius: var(--radius-md); padding: 14px 16px; cursor: pointer; transition: border-color 0.15s; display: flex; align-items: center; gap: 14px; user-select: none; }
-        .link-method-card:hover { border-color: rgba(255,255,255,0.15); }
-        .link-method-card.active { border-color: var(--accent-primary); background: rgba(37,211,102,0.04); }
-        .link-method-icon-container { width: 38px; height: 38px; border-radius: 50%; background: rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: center; color: var(--text-secondary); }
-        .link-method-card.active .link-method-icon-container { background: var(--accent-primary-muted); color: var(--accent-primary); }
-        .link-method-radio { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border-primary); display: flex; align-items: center; justify-content: center; }
-        .link-method-card.active .link-method-radio { border-color: var(--accent-primary); }
-        .link-method-radio-inner { width: 10px; height: 10px; border-radius: 50%; background: transparent; }
-        .link-method-card.active .link-method-radio-inner { background: var(--accent-primary); }
-
-        .switch-account-btn { width: 100%; padding: 9px 12px; background: transparent; border: 1px dashed rgba(255,255,255,0.12); border-radius: var(--radius-md); color: var(--text-muted); font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: border-color 0.15s, color 0.15s; }
-        .switch-account-btn:hover:not(:disabled) { border-color: rgba(239,68,68,0.4); color: #f87171; }
-        .switch-account-btn:disabled { opacity: 0.5; cursor: not-allowed; }
       `}</style>
     </div>
   )
