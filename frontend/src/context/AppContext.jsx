@@ -103,8 +103,6 @@ export function AppProvider({ children }) {
       // Every time a session first becomes connected: remount UI + sync contacts
       if (data.status === 'connected' && prevStatusRef.current !== 'connected') {
         prevStatusRef.current = 'connected'
-        // Remount all pages so stale data from the previous session is cleared
-        // and every component refetches fresh. Covers same-account re-login too.
         setAccountKey(k => k + 1)
         const lastSync = localStorage.getItem('wa_last_sync')
         const now = Date.now()
@@ -113,6 +111,13 @@ export function AppProvider({ children }) {
           contactsApi.sync().catch(() => {})
         }
       } else if (data.status !== 'connected') {
+        // Just logged out / disconnected — clear all cached account data
+        if (prevStatusRef.current === 'connected') {
+          setAccountKey(k => k + 1)           // remount UI → clears stale state
+          prevPhoneRef.current = null          // forget old phone
+          localStorage.removeItem('wa_active_phone')
+          localStorage.removeItem('wa_last_sync')
+        }
         prevStatusRef.current = data.status
       }
 

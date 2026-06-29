@@ -36,13 +36,13 @@ def get_contacts(
 ) -> dict:
     """List contacts with pagination and search.
 
-    If wa_account is provided, returns only contacts belonging to that account.
-    Contacts from other accounts are hidden (strict per-account isolation).
+    wa_account is REQUIRED for results — returns empty when no account is active
+    so logged-out users never see another account's contacts.
     """
-    query = db.query(Contact)
+    if not wa_account:
+        return {"contacts": [], "total": 0, "page": page, "limit": limit}
 
-    if wa_account:
-        query = query.filter(Contact.wa_account == wa_account)
+    query = db.query(Contact).filter(Contact.wa_account == wa_account)
 
     if search:
         search_term = f"%{search}%"
@@ -131,10 +131,9 @@ def delete_contact(db: Session, contact_id: int) -> bool:
 
 
 def get_total_contacts(db: Session, wa_account: Optional[str] = None) -> int:
-    q = db.query(func.count(Contact.id))
-    if wa_account:
-        q = q.filter(Contact.wa_account == wa_account)
-    return q.scalar() or 0
+    if not wa_account:
+        return 0
+    return db.query(func.count(Contact.id)).filter(Contact.wa_account == wa_account).scalar() or 0
 
 
 def sync_whatsapp_contacts(db: Session) -> dict:

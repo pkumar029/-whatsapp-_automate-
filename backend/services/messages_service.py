@@ -22,8 +22,12 @@ def get_messages(
     contact_id: Optional[int] = None,
     wa_account: Optional[str] = None,
 ) -> dict:
+    # When no account is active (logged out) and no specific contact is
+    # requested, return nothing — avoids leaking data across accounts.
+    if not wa_account and not contact_id:
+        return {"messages": [], "total": 0, "page": page, "limit": limit}
+
     query = db.query(Message)
-    # wa_account kept for compatibility — messages are shared across all accounts
 
     if search:
         s = f"%{search}%"
