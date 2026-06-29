@@ -89,21 +89,25 @@ export default function Login() {
     return () => { cancelled = true; clearInterval(iv) }
   }, [])
 
-  // Poll status while connecting
+  // Poll status while connecting — navigate immediately when connected
   useEffect(() => {
     let interval = null
-    if (sessionStatus.status === 'connecting') {
+    if (sessionStatus.status === 'connecting' || view === 'connecting') {
       interval = setInterval(() => {
         refreshSessionStatus().then(data => {
+          if (data?.status === 'connected') {
+            navigate('/dashboard')
+            return
+          }
           if (data?.qr) setQrCode(data.qr)
           else setQrCode(null)
           if (data?.pairing_code) setPairingCode(data.pairing_code)
           else setPairingCode(null)
         }).catch(() => {})
-      }, 3000)
+      }, 2000)
     }
     return () => { if (interval) clearInterval(interval) }
-  }, [sessionStatus.status, refreshSessionStatus])
+  }, [sessionStatus.status, view, refreshSessionStatus, navigate])
 
   const handleSelectMethod = (id) => {
     setConnectionType(id)
@@ -136,8 +140,9 @@ export default function Login() {
       if (res.data?.pairing_code) setPairingCode(res.data.pairing_code)
 
       if (res.data?.status === 'connected') {
-        setMessage(res.data.message || 'Connected successfully!')
         await refreshSessionStatus()
+        navigate('/dashboard')
+        return
       } else {
         setMessage(res.data.message || 'Connecting... Please wait.')
         setView('connecting')

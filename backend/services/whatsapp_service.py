@@ -184,29 +184,48 @@ def connect_whatsapp_with_config(db: Session, config: "WhatsAppConnectRequest") 
             if r.status_code != 200:
                 raise Exception(f"Bridge server returned status code {r.status_code}")
                 
-            # Immediately get bridge status to fetch any initial QR
+            # Immediately get bridge status — may already be connected (saved session)
             r_status = httpx.get("http://localhost:7002/status", timeout=5.0)
             qr_base64 = None
             pairing_code = None
             if r_status.status_code == 200:
                 bridge_data = r_status.json()
+                bridge_status = bridge_data.get("status")
+
+                if bridge_status == "connected":
+                    session.status = SessionStatus.connected
+                    session.phone = bridge_data.get("phone")
+                    session.connected_at = datetime.utcnow()
+                    session.qr_code = None
+                    db.commit()
+                    if session.phone:
+                        from services.contacts_service import claim_orphan_contacts
+                        claim_orphan_contacts(db, session.phone)
+                    return {
+                        "status": "connected",
+                        "message": "WhatsApp connected successfully.",
+                        "phone": session.phone,
+                        "session_id": session.id,
+                    }
+
                 qr_base64 = bridge_data.get("qr")
                 pairing_code = bridge_data.get("pairing_code")
-                
+
             session.qr_code = qr_base64
             db.commit()
             db.refresh(session)
-            
+
             msg = "Connecting to whatsapp-web.js bridge. "
             if pairing_code:
                 msg += f"Pairing code generated: {pairing_code}"
             else:
-                msg += "QR Code generated."
-                
+                msg += "Waiting for QR code..."
+
             return {
                 "status": "connecting",
                 "message": msg,
                 "qr": qr_base64,
+                "pairing_code": pairing_code,
                 "session_id": session.id
             }
         except Exception as e:
