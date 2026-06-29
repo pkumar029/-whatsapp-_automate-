@@ -17,6 +17,18 @@ function removeSessionLockfile() {
     }
 }
 
+function clearSessionFiles() {
+    const sessionDir = path.join(__dirname, '.wwebjs_auth');
+    try {
+        if (fs.existsSync(sessionDir)) {
+            fs.rmSync(sessionDir, { recursive: true, force: true });
+            console.log('Cleared WhatsApp session files — next connect will require fresh QR/pairing.');
+        }
+    } catch (err) {
+        console.warn('Failed to clear session files:', err.message);
+    }
+}
+
 process.on('uncaughtException', (err) => {
     console.error('Uncaught Exception caught:', err.message);
     if (err.message && err.message.includes('EBUSY')) {
@@ -57,6 +69,9 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
         } catch (e) {
             console.error('Error destroying client:', e);
         }
+        // Clear saved session so a fresh QR/pairing is required (prevents old account from
+        // being auto-restored by LocalAuth when switching to a different number)
+        clearSessionFiles();
     }
 
     // Clean lock file before restarting to prevent EBUSY/locked session folder errors
@@ -272,6 +287,7 @@ app.post('/connect', async (req, res) => {
 app.post('/disconnect', async (req, res) => {
     if (!client) {
         clientStatus = 'disconnected';
+        clearSessionFiles();
         return res.json({ success: true, message: 'No client session to disconnect' });
     }
 
@@ -285,6 +301,10 @@ app.post('/disconnect', async (req, res) => {
             await client.destroy();
         } catch (ee) {}
     }
+
+    // Always clear saved session files so the next /connect starts with a fresh QR/pairing.
+    // This ensures switching to a different WhatsApp account works correctly.
+    clearSessionFiles();
 
     client = null;
     clientStatus = 'disconnected';
