@@ -159,12 +159,13 @@ class Message(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     contact_id = Column(Integer, ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True)
     phone = Column(String(100), nullable=False)
+    wa_account = Column(String(100), nullable=True)   # owning WhatsApp number
     direction = Column(Enum(MessageDirection), nullable=False)
     content = Column(Text, nullable=False)
     media_url = Column(String(500), nullable=True)
     media_type = Column(String(50), nullable=True)
     status = Column(Enum(MessageStatus), default=MessageStatus.pending)
-    whatsapp_message_id = Column(String(100), nullable=True)
+    whatsapp_message_id = Column(String(200), nullable=True)
     automation_id = Column(Integer, ForeignKey("automations.id", ondelete="SET NULL"), nullable=True)
     error_message = Column(Text, nullable=True)
     sent_at = Column(DateTime, nullable=True)
@@ -177,10 +178,12 @@ class Message(Base):
 
     __table_args__ = (
         Index("idx_message_phone", "phone"),
+        Index("idx_message_wa_account", "wa_account"),
         Index("idx_message_direction", "direction"),
         Index("idx_message_status", "status"),
         Index("idx_message_contact", "contact_id"),
         Index("idx_message_created", "created_at"),
+        Index("idx_message_wa_id", "whatsapp_message_id"),
     )
 
 

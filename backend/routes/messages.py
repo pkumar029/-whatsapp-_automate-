@@ -76,6 +76,15 @@ async def list_messages(
         db, page=page, limit=limit, search=search,
         direction=direction, contact_id=contact_id, wa_account=wa_account
     )
+@router.post("/sync")
+async def sync_messages(db: Session = Depends(get_db)):
+    """Pull full chat + message history from the bridge for the active account."""
+    result = messages_service.sync_message_history(db)
+    if not result.get("success"):
+        raise HTTPException(status_code=503, detail=result.get("message", "Sync failed"))
+    return result
+
+
 @router.post("/send", status_code=201)
 async def send_message(data: MessageSend, db: Session = Depends(get_db)):
     """Send a WhatsApp message."""

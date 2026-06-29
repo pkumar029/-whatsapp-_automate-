@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react'
-import { whatsappApi, contactsApi } from '../services/api'
+import { whatsappApi, contactsApi, messagesApi } from '../services/api'
 
 const AppContext = createContext()
 
@@ -109,9 +109,11 @@ export function AppProvider({ children }) {
         const now = Date.now()
         if (!lastSync || now - parseInt(lastSync, 10) > 30 * 60 * 1000) {
           localStorage.setItem('wa_last_sync', String(now))
+          // Sync contacts first, then messages — both run in background
           contactsApi.sync()
+            .then(() => messagesApi.sync().catch(() => {}))
             .then(() => setSyncedAt(Date.now()))   // signal pages to refetch
-            .catch(() => {})
+            .catch(() => setSyncedAt(Date.now()))  // still signal even if sync failed
         }
       } else if (data.status !== 'connected') {
         // Just logged out / disconnected — clear all cached account data

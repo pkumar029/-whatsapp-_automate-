@@ -71,6 +71,7 @@ export const messagesApi = {
   getById: (id) => api.get(`/messages/${id}`),
   send: (data) => api.post('/messages/send', data),
   getByContact: (contactId, params) => api.get(`/messages/contact/${contactId}`, { params }),
+  sync: () => api.post('/messages/sync'),
 }
 
 // ─── Automations API ─────────────────────────────────────────

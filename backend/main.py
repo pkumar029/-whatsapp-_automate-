@@ -52,6 +52,14 @@ async def lifespan(app: FastAPI):
          "ALTER TABLE automation_steps MODIFY COLUMN step_type "
          "ENUM('send_message','send_image','add_tag','remove_tag','react_message',"
          "'delay','condition','update_contact','webhook','log') NOT NULL"),
+        ("messages wa_account column",
+         "ALTER TABLE messages ADD COLUMN wa_account VARCHAR(100) NULL"),
+        ("messages wa_account index",
+         "ALTER TABLE messages ADD INDEX idx_message_wa_account (wa_account)"),
+        ("messages whatsapp_message_id resize",
+         "ALTER TABLE messages MODIFY COLUMN whatsapp_message_id VARCHAR(200) NULL"),
+        ("messages whatsapp_id index",
+         "ALTER TABLE messages ADD INDEX idx_message_wa_id (whatsapp_message_id)"),
     ]
     for _name, _sql_str in _migrations:
         try:

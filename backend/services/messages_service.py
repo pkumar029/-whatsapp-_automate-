@@ -1,5 +1,5 @@
 """
-Messages Service — send, validate, save records, track status
+Messages Service — send, validate, save records, track status, sync history
 """
 import logging
 from typing import Optional
@@ -13,6 +13,13 @@ from services import whatsapp_service
 logger = logging.getLogger(__name__)
 
 
+def _active_account(db: Session) -> Optional[str]:
+    """Return the phone of the currently connected WhatsApp account."""
+    from models.models import WhatsappSession, SessionStatus
+    s = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
+    return s.phone if s else None
+
+
 def get_messages(
     db: Session,
     page: int = 1,
@@ -22,12 +29,14 @@ def get_messages(
     contact_id: Optional[int] = None,
     wa_account: Optional[str] = None,
 ) -> dict:
-    # When no account is active (logged out) and no specific contact is
-    # requested, return nothing — avoids leaking data across accounts.
     if not wa_account and not contact_id:
         return {"messages": [], "total": 0, "page": page, "limit": limit}
 
     query = db.query(Message)
+
+    # Strict per-account filter
+    if wa_account:
+        query = query.filter(Message.wa_account == wa_account)
 
     if search:
         s = f"%{search}%"
@@ -40,7 +49,6 @@ def get_messages(
     total = query.count()
     messages = query.order_by(Message.created_at.desc()).offset((page - 1) * limit).limit(limit).all()
 
-    # Attach contact names
     result = []
     for m in messages:
         item = m.__dict__.copy()
@@ -57,7 +65,6 @@ def get_messages(
 
 def send_message(db: Session, data: MessageSend) -> Message:
     """Validate, send via WhatsApp, and save message record."""
-    # Resolve phone
     phone = data.phone
     contact_id = data.contact_id
 
@@ -70,10 +77,12 @@ def send_message(db: Session, data: MessageSend) -> Message:
     if not phone:
         raise ValueError("Phone number is required")
 
-    # Create message record
+    wa_account = _active_account(db)
+
     msg = Message(
         contact_id=contact_id,
         phone=phone,
+        wa_account=wa_account,
         direction=MessageDirection.outbound,
         content=data.message,
         media_url=data.media_url,
@@ -84,7 +93,6 @@ def send_message(db: Session, data: MessageSend) -> Message:
     db.commit()
     db.refresh(msg)
 
-    # Attempt to send via WhatsApp
     try:
         result = whatsapp_service.send_whatsapp_message(db, phone, data.message)
         msg.status = MessageStatus.sent
@@ -100,9 +108,113 @@ def send_message(db: Session, data: MessageSend) -> Message:
     return msg
 
 
+def sync_message_history(db: Session) -> dict:
+    """
+    Fetch chat + message history from the bridge and store in the DB.
+    Deduplicates by whatsapp_message_id — safe to call repeatedly.
+    """
+    import httpx
+    from services.contacts_service import get_contact_by_phone, create_contact
+    from models.schemas import ContactCreate
+
+    wa_account = _active_account(db)
+    if not wa_account:
+        return {"success": False, "message": "No active WhatsApp account"}
+
+    try:
+        r = httpx.get("http://localhost:7002/sync-messages", timeout=60.0)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        logger.error(f"sync_message_history: bridge unreachable — {e}")
+        return {"success": False, "message": str(e)}
+
+    if not data.get("success"):
+        return {"success": False, "message": data.get("error", "Bridge returned failure")}
+
+    chats_saved = 0
+    messages_saved = 0
+    messages_skipped = 0
+
+    for chat in data.get("chats", []):
+        phone = chat.get("phone")
+        name = chat.get("name") or phone
+        chat_messages = chat.get("messages", [])
+        if not phone or not chat_messages:
+            continue
+
+        # Resolve or create contact
+        contact = get_contact_by_phone(db, phone)
+        if not contact:
+            contact = create_contact(db, ContactCreate(name=name, phone=phone))
+        if not contact.wa_account:
+            contact.wa_account = wa_account
+            db.add(contact)
+            db.commit()
+            db.refresh(contact)
+
+        chats_saved += 1
+
+        for raw in chat_messages:
+            wa_msg_id = raw.get("id")
+            body = raw.get("body", "")
+            from_me = raw.get("fromMe", False)
+            ts = raw.get("timestamp")
+
+            if not body:
+                continue
+
+            # Dedup by WhatsApp message ID
+            if wa_msg_id:
+                exists = db.query(Message.id).filter(
+                    Message.whatsapp_message_id == wa_msg_id
+                ).first()
+                if exists:
+                    messages_skipped += 1
+                    continue
+
+            direction = MessageDirection.outbound if from_me else MessageDirection.inbound
+            sent_at = datetime.utcfromtimestamp(ts / 1000) if ts else datetime.utcnow()
+
+            msg = Message(
+                contact_id=contact.id,
+                phone=phone,
+                wa_account=wa_account,
+                direction=direction,
+                content=body,
+                status=MessageStatus.sent if from_me else MessageStatus.read,
+                whatsapp_message_id=wa_msg_id,
+                sent_at=sent_at,
+                created_at=sent_at,
+            )
+            db.add(msg)
+            messages_saved += 1
+
+        if messages_saved > 0 and messages_saved % 200 == 0:
+            db.commit()
+
+    db.commit()
+    logger.info(
+        f"sync_message_history: {chats_saved} chats, "
+        f"{messages_saved} new messages, {messages_skipped} skipped"
+    )
+    return {
+        "success": True,
+        "chats": chats_saved,
+        "messages_saved": messages_saved,
+        "messages_skipped": messages_skipped,
+    }
+
+
 def get_sent_count(db: Session, wa_account: Optional[str] = None) -> int:
-    return db.query(func.count(Message.id)).filter(Message.status == MessageStatus.sent).scalar() or 0
+    q = db.query(func.count(Message.id)).filter(Message.status == MessageStatus.sent)
+    if wa_account:
+        q = q.filter(Message.wa_account == wa_account)
+    return q.scalar() or 0
 
 
 def get_failed_count(db: Session, wa_account: Optional[str] = None) -> int:
-    return db.query(func.count(Message.id)).filter(Message.status == MessageStatus.failed).scalar() or 0
+    q = db.query(func.count(Message.id)).filter(Message.status == MessageStatus.failed)
+    if wa_account:
+        q = q.filter(Message.wa_account == wa_account)
+    return q.scalar() or 0

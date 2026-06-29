@@ -43,7 +43,7 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 7002;
 
 app.use(cors());
 app.use(express.json());
@@ -413,8 +413,8 @@ app.get('/contacts', async (req, res) => {
                 const isBroadcast = jid.endsWith('@broadcast') || (c.id && c.id.server === 'broadcast');
                 if (isBroadcast) return false;
                 if (isGroup) return true;
-                // Only include contacts actually saved in the phone's address book
-                return c.isMyContact === true;
+                // Include contacts in address book, active chats, or any valid WhatsApp contact
+                return c.isMyContact === true || c.fromActiveChat === true || c.isWAContact === true;
             })
             .map(c => {
                 const jid = c.id._serialized;
@@ -431,12 +431,12 @@ app.get('/contacts', async (req, res) => {
                     phone = num ? '+' + num : jid;
                 }
 
-                let name = c.name || (type !== 'User' ? c.pushname : null);
+                let name = c.name || c.pushname || c.shortName || c.verifiedName;
                 if (!name) {
                     if (type === 'Group') {
                         name = 'Unnamed Group (' + jid.split('@')[0] + ')';
                     } else {
-                        name = null; // will be filtered out below
+                        name = c.number || (c.id && c.id.user) || 'Unnamed Contact';
                     }
                 }
 
@@ -683,6 +683,59 @@ app.get('/profile-pic', async (req, res) => {
     } catch (e) {
         // Contact has no profile pic or privacy settings block it
         res.json({ success: false, url: null });
+    }
+});
+
+// GET /sync-messages — full chat history for all chats (used on login to backfill DB)
+app.get('/sync-messages', async (req, res) => {
+    if (clientStatus !== 'connected' || !client) {
+        return res.json({ success: false, chats: [], error: 'Not connected' });
+    }
+    const msgLimit = parseInt(req.query.msgLimit) || 50;   // messages per chat
+    const chatLimit = parseInt(req.query.chatLimit) || 60; // number of chats
+    try {
+        const chats = await client.getChats();
+        const result = [];
+        for (const chat of chats.slice(0, chatLimit)) {
+            let phone, name;
+            if (chat.isGroup) {
+                phone = chat.id._serialized;
+                name = chat.name;
+            } else {
+                phone = '+' + chat.id.user;
+                try {
+                    const contact = await chat.getContact();
+                    name = contact.name || contact.pushname || phone;
+                } catch {
+                    name = phone;
+                }
+            }
+
+            let msgs = [];
+            try {
+                msgs = await chat.fetchMessages({ limit: msgLimit });
+            } catch (fetchErr) {
+                console.warn(`Could not fetch messages for ${phone}: ${fetchErr.message}`);
+            }
+
+            const messages = msgs
+                .filter(m => m.body)
+                .map(m => ({
+                    id: m.id.id,
+                    body: m.body,
+                    fromMe: m.fromMe,
+                    timestamp: m.timestamp * 1000,
+                    type: m.type,
+                }));
+
+            if (messages.length > 0) {
+                result.push({ phone, name, isGroup: chat.isGroup, messages });
+            }
+        }
+        res.json({ success: true, chats: result });
+    } catch (e) {
+        console.error('sync-messages error:', e.message);
+        res.json({ success: false, chats: [], error: e.message });
     }
 });
 

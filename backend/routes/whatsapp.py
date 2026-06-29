@@ -115,9 +115,12 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
                 db.refresh(contact)
             
         # 2. Save message
+        active_session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
+        wa_account = active_session.phone if active_session else None
         msg = Message(
             contact_id=contact.id,
             phone=phone,
+            wa_account=wa_account,
             direction=MessageDirection.inbound,
             content=content,
             status=MessageStatus.read,
@@ -140,6 +143,7 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
                 "name": contact.name,
                 "content": content,
                 "direction": "inbound",
+                "wa_account": wa_account,
             })
         except Exception:
             pass
