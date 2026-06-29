@@ -68,9 +68,9 @@ export default function Login() {
     }
   }, [sessionStatus.status, navigate])
 
-  // If session drops back to disconnected while on the connecting screen, return to method picker
+  // If session drops unexpectedly while on the connecting screen, return to method picker
   useEffect(() => {
-    if (sessionStatus.status === 'disconnected' && view === 'connecting') {
+    if (sessionStatus.status !== 'connected' && sessionStatus.status !== 'connecting' && view === 'connecting') {
       setView('method')
       setQrCode(null)
       setPairingCode(null)
@@ -168,16 +168,16 @@ export default function Login() {
     }
   }
 
-  const handleCancel = async () => {
-    try {
-      await whatsappApi.disconnect()
-      await refreshSessionStatus()
-    } catch {}
+  const handleCancel = () => {
+    // Navigate back immediately — don't wait for the async disconnect
     setQrCode(null)
     setPairingCode(null)
     setMessage('')
     setErrorMsg('')
-    setView('form')
+    setView('method')
+    // Fire-and-forget disconnect in background
+    whatsappApi.disconnect().catch(() => {})
+    refreshSessionStatus().catch(() => {})
   }
 
   const isConnecting = sessionStatus.status === 'connecting'
