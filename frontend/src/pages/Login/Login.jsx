@@ -180,9 +180,8 @@ export default function Login() {
       position: 'relative',
       overflow: 'hidden'
     }}>
-      {/* Ambient blobs */}
-      <div style={{ position: 'absolute', width: 400, height: 400, background: 'rgba(37,211,102,0.08)', filter: 'blur(100px)', borderRadius: '50%', top: '10%', left: '10%', pointerEvents: 'none' }} />
-      <div style={{ position: 'absolute', width: 300, height: 300, background: 'rgba(139,92,246,0.08)', filter: 'blur(80px)', borderRadius: '50%', bottom: '10%', right: '10%', pointerEvents: 'none' }} />
+      {/* Subtle static gradient accent — no blur, no compositing cost */}
+      <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse 60% 40% at 20% 20%, rgba(37,211,102,0.05) 0%, transparent 70%)', pointerEvents: 'none' }} />
 
       {/* Backend status banner */}
       {backendOk === false && (
@@ -425,69 +424,62 @@ export default function Login() {
 
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
-        @keyframes pulse-glow {
-          0% { transform: scale(0.95); opacity: 0.8; box-shadow: 0 0 0 0 rgba(37,211,102,0.4); }
-          70% { transform: scale(1.05); opacity: 1; box-shadow: 0 0 0 12px rgba(37,211,102,0); }
-          100% { transform: scale(0.95); opacity: 0.8; box-shadow: 0 0 0 0 rgba(37,211,102,0); }
-        }
-        @keyframes fade-in { from { opacity:0; transform:translateY(15px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes pulse-ring { 0%,100% { opacity: 0.5; transform: scale(1); } 50% { opacity: 1; transform: scale(1.08); } }
+        @keyframes fade-in { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
 
         .splash-card {
           width: 100%; max-width: 440px;
-          background: rgba(22,27,34,0.75);
+          background: #161b22;
           border: 1px solid rgba(255,255,255,0.08);
           border-radius: var(--radius-lg);
           padding: 48px 36px;
-          box-shadow: 0 20px 50px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.1);
-          backdrop-filter: blur(20px);
+          box-shadow: 0 4px 16px rgba(0,0,0,0.5);
           z-index: 10;
           display: flex; flex-direction: column; align-items: center; gap: 28px;
           text-align: center; cursor: pointer;
-          animation: fade-in 0.6s cubic-bezier(0.16,1,0.3,1) forwards;
-          transition: transform 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+          animation: fade-in 0.25s ease forwards;
+          transition: border-color 0.2s;
         }
-        .splash-card:hover { transform: translateY(-4px); border-color: rgba(37,211,102,0.3); box-shadow: 0 30px 60px rgba(0,0,0,0.8), 0 0 30px rgba(37,211,102,0.1); }
-        .logo-container { position: relative; width: 90px; height: 90px; display: flex; align-items: center; justify-content: center; animation: float 4s ease-in-out infinite; }
-        .logo-pulse-ring { position: absolute; width: 100%; height: 100%; border-radius: 50%; border: 2px solid rgba(37,211,102,0.3); animation: pulse-glow 2.5s infinite; }
-        .logo-icon-bg { width: 72px; height: 72px; background: linear-gradient(135deg,#10b981 0%,#059669 100%); border-radius: 20px; display: flex; align-items: center; justify-content: center; color: #fff; position: relative; box-shadow: 0 10px 25px rgba(16,185,129,0.4); }
-        .logo-message { filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15)); }
-        .logo-zap { position: absolute; bottom: 12px; right: 12px; color: #fbbf24; fill: #fbbf24; filter: drop-shadow(0 2px 6px rgba(251,191,36,0.6)); }
+        .splash-card:hover { border-color: rgba(37,211,102,0.3); }
+        .logo-container { position: relative; width: 90px; height: 90px; display: flex; align-items: center; justify-content: center; }
+        .logo-pulse-ring { position: absolute; width: 100%; height: 100%; border-radius: 50%; border: 2px solid rgba(37,211,102,0.35); animation: pulse-ring 2.5s ease-in-out infinite; will-change: transform, opacity; }
+        .logo-icon-bg { width: 72px; height: 72px; background: linear-gradient(135deg,#10b981 0%,#059669 100%); border-radius: 20px; display: flex; align-items: center; justify-content: center; color: #fff; position: relative; }
+        .logo-message { }
+        .logo-zap { position: absolute; bottom: 12px; right: 12px; color: #fbbf24; fill: #fbbf24; }
         .splash-text { display: flex; flex-direction: column; gap: 8px; }
-        .splash-title { font-size: 24px; font-weight: 800; color: #fff; letter-spacing: 2px; margin: 0; text-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+        .splash-title { font-size: 24px; font-weight: 800; color: #fff; letter-spacing: 2px; margin: 0; }
         .splash-subtitle { font-size: 14px; font-weight: 500; color: var(--accent-primary); margin: 0; }
         .splash-description { font-size: 13px; color: var(--text-muted); line-height: 1.6; margin: 10px 0 0; }
-        .splash-btn { width: 100%; height: 44px; background: linear-gradient(135deg,var(--accent-primary) 0%,#15803d 100%); border: none; border-radius: var(--radius-md); color: #000; font-size: 14px; font-weight: 700; letter-spacing: 0.5px; cursor: pointer; box-shadow: 0 4px 15px rgba(37,211,102,0.3); transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; }
-        .splash-card:hover .splash-btn { transform: scale(1.02); box-shadow: 0 6px 20px rgba(37,211,102,0.5); background: linear-gradient(135deg,#4ade80 0%,#16a34a 100%); }
+        .splash-btn { width: 100%; height: 44px; background: var(--accent-primary); border: none; border-radius: var(--radius-md); color: #000; font-size: 14px; font-weight: 700; letter-spacing: 0.5px; cursor: pointer; transition: opacity 0.15s; display: flex; align-items: center; justify-content: center; }
+        .splash-btn:hover { opacity: 0.88; }
 
         .portal-card {
           width: 100%; max-width: 440px;
-          background: rgba(22,27,34,0.75);
+          background: #161b22;
           border: 1px solid rgba(255,255,255,0.08);
           border-radius: var(--radius-lg);
           padding: 30px 24px;
-          box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-          backdrop-filter: blur(12px);
+          box-shadow: 0 4px 12px rgba(0,0,0,0.4);
           z-index: 10;
           display: flex; flex-direction: column; gap: 0;
-          animation: fade-in 0.35s cubic-bezier(0.16,1,0.3,1) forwards;
+          animation: fade-in 0.2s ease forwards;
         }
         .portal-icon { width: 48px; height: 48px; border-radius: 50%; background: var(--accent-primary-muted); color: var(--accent-primary); display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; border: 1px solid rgba(37,211,102,0.2); }
         .portal-title { font-size: 20px; font-weight: 700; color: #fff; margin: 0 0 4px; }
         .portal-subtitle { font-size: var(--font-size-xs); color: var(--text-muted); margin: 0; }
 
-        .method-card { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border: 1px solid var(--border-primary); background: rgba(255,255,255,0.02); border-radius: var(--radius-md); cursor: pointer; transition: all 0.2s ease; width: 100%; text-align: left; }
-        .method-card:hover { border-color: var(--accent-primary); background: rgba(37,211,102,0.04); }
+        .method-card { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border: 1px solid var(--border-primary); background: rgba(255,255,255,0.02); border-radius: var(--radius-md); cursor: pointer; transition: border-color 0.15s; width: 100%; text-align: left; }
+        .method-card:hover { border-color: var(--accent-primary); }
         .method-icon { width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: center; color: var(--accent-primary); flex-shrink: 0; }
 
-        .link-method-card { border: 1px solid var(--border-primary); background: rgba(255,255,255,0.02); border-radius: var(--radius-md); padding: 14px 16px; cursor: pointer; transition: all 0.25s cubic-bezier(0.16,1,0.3,1); display: flex; align-items: center; gap: 14px; user-select: none; }
-        .link-method-card:hover { border-color: rgba(255,255,255,0.15); background: rgba(255,255,255,0.04); }
-        .link-method-card.active { border-color: var(--accent-primary); background: rgba(37,211,102,0.04); box-shadow: 0 0 15px rgba(37,211,102,0.05); }
-        .link-method-icon-container { width: 38px; height: 38px; border-radius: 50%; background: rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: center; color: var(--text-secondary); transition: all 0.25s; }
+        .link-method-card { border: 1px solid var(--border-primary); background: rgba(255,255,255,0.02); border-radius: var(--radius-md); padding: 14px 16px; cursor: pointer; transition: border-color 0.15s; display: flex; align-items: center; gap: 14px; user-select: none; }
+        .link-method-card:hover { border-color: rgba(255,255,255,0.15); }
+        .link-method-card.active { border-color: var(--accent-primary); background: rgba(37,211,102,0.04); }
+        .link-method-icon-container { width: 38px; height: 38px; border-radius: 50%; background: rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: center; color: var(--text-secondary); }
         .link-method-card.active .link-method-icon-container { background: var(--accent-primary-muted); color: var(--accent-primary); }
-        .link-method-radio { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border-primary); display: flex; align-items: center; justify-content: center; transition: all 0.25s; }
+        .link-method-radio { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border-primary); display: flex; align-items: center; justify-content: center; }
         .link-method-card.active .link-method-radio { border-color: var(--accent-primary); }
-        .link-method-radio-inner { width: 10px; height: 10px; border-radius: 50%; background: transparent; transition: all 0.25s; }
+        .link-method-radio-inner { width: 10px; height: 10px; border-radius: 50%; background: transparent; }
         .link-method-card.active .link-method-radio-inner { background: var(--accent-primary); }
       `}</style>
     </div>
