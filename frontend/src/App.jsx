@@ -1,4 +1,3 @@
-import { useState, useEffect, useCallback } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import Layout from './components/Layout/Layout'
 import Dashboard from './pages/Dashboard/Dashboard'
@@ -11,9 +10,7 @@ import Campaigns from './pages/Campaigns/Campaigns'
 import Profile from './pages/Profile/Profile'
 import Status from './pages/Status/Status'
 import Login from './pages/Login/Login'
-import Auth from './pages/Auth/Auth'
 import { useApp } from './context/AppContext'
-import { authApi } from './services/api'
 
 // Remounts Layout (and all child pages) when the connected WhatsApp account changes
 function KeyedLayout() {
@@ -59,37 +56,6 @@ function ProtectedRoute() {
 }
 
 function App() {
-  const [authChecked, setAuthChecked] = useState(false)
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-
-  // Validate stored token on startup
-  useEffect(() => {
-    const token = localStorage.getItem('wa_auth_token')
-    if (!token) { setAuthChecked(true); return }
-    authApi.me()
-      .then(() => { setIsAuthenticated(true); setAuthChecked(true) })
-      .catch(() => {
-        localStorage.removeItem('wa_auth_token')
-        localStorage.removeItem('wa_auth_phone')
-        setAuthChecked(true)
-      })
-  }, [])
-
-  const handleAuthenticated = useCallback(() => setIsAuthenticated(true), [])
-
-  if (!authChecked) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#0d1117' }}>
-        <div style={{ width: 32, height: 32, border: '3px solid #222', borderTop: '3px solid #25d366', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      </div>
-    )
-  }
-
-  if (!isAuthenticated) {
-    return <Auth onAuthenticated={handleAuthenticated} />
-  }
-
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>

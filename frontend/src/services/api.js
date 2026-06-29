@@ -36,17 +36,6 @@ api.interceptors.response.use(
   }
 )
 
-// ─── Auth API ─────────────────────────────────────────────────
-export const authApi = {
-  requestOtp: (phone) => api.post('/auth/request-otp', { phone }),
-  verifyOtp: (phone, otp) => api.post('/auth/verify-otp', { phone, otp }),
-  me: () => api.get('/auth/me'),
-  logout: () => api.post('/auth/logout'),
-  getSmsSettings: () => api.get('/auth/sms-settings'),
-  saveSmsSettings: (data) => api.put('/auth/sms-settings', data),
-  testSms: (phone) => api.post('/auth/test-sms', { phone }),
-}
-
 // ─── WhatsApp API ─────────────────────────────────────────────
 export const whatsappApi = {
   getStatus: () => api.get('/whatsapp/status'),
