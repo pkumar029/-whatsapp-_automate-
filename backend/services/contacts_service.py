@@ -21,10 +21,17 @@ def get_contacts(
 ) -> dict:
     """List contacts with pagination and search.
 
-    wa_account is accepted for compatibility but all contacts are shared across
-    accounts — switching WhatsApp numbers does not hide existing contacts.
+    If wa_account is provided, returns contacts belonging to that account plus
+    contacts with no account set (manually added / legacy records that predate
+    the wa_account field).  Contacts strictly belonging to a DIFFERENT account
+    are excluded so switching accounts shows a clean view.
     """
     query = db.query(Contact)
+
+    if wa_account:
+        query = query.filter(
+            or_(Contact.wa_account == wa_account, Contact.wa_account.is_(None))
+        )
 
     if search:
         search_term = f"%{search}%"
@@ -113,7 +120,10 @@ def delete_contact(db: Session, contact_id: int) -> bool:
 
 
 def get_total_contacts(db: Session, wa_account: Optional[str] = None) -> int:
-    return db.query(func.count(Contact.id)).scalar() or 0
+    q = db.query(func.count(Contact.id))
+    if wa_account:
+        q = q.filter(or_(Contact.wa_account == wa_account, Contact.wa_account.is_(None)))
+    return q.scalar() or 0
 
 
 def sync_whatsapp_contacts(db: Session) -> dict:
