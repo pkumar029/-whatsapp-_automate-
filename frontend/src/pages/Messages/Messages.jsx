@@ -10,6 +10,7 @@ import {
   Plus, Pencil, UserPlus, UserMinus, Crown, LogOut, Hash
 } from 'lucide-react'
 import { messagesApi, contactsApi, whatsappApi, groupsApi, BASE_URL } from '../../services/api'
+import { useApp } from '../../context/AppContext'
 import { Link } from 'react-router-dom'
 import { formatISTTime } from '../../utils/date'
 import { getErrorMessage } from '../../utils/error'
@@ -890,8 +891,7 @@ export default function Messages() {
   const [groupModal, setGroupModal] = useState(null) // { type: 'rename'|'desc'|'addMember', groupId, current }
 
   const isMobile = useIsMobile()
-  const [sessionStatus, setSessionStatus] = useState({ status: 'disconnected' })
-  const [loadingSession, setLoadingSession] = useState(true)
+  const { sessionStatus, loadingSession, syncedAt } = useApp()
   const [showAttachMenu, setShowAttachMenu] = useState(false)
   const [callModal, setCallModal] = useState(null)
   const [attachModal, setAttachModal] = useState(null)
@@ -967,11 +967,8 @@ export default function Messages() {
     } catch { setReactions({}); setStarredMsgs(new Set()) }
   }, [selectedContact?.id])
 
-  // Session status
+  // Browser notification permission check on mount
   useEffect(() => {
-    whatsappApi.getStatus().then(res => {
-      setSessionStatus(res.data); setLoadingSession(false)
-    }).catch(() => { setSessionStatus({ status: 'disconnected' }); setLoadingSession(false) })
     if (typeof Notification !== 'undefined') setNotifEnabled(Notification.permission === 'granted')
   }, [])
 
@@ -1057,6 +1054,8 @@ export default function Messages() {
   }, [])
 
   useEffect(() => { fetchContacts(); preloadLastMessages() }, [])
+  // Refetch when background sync completes so new contacts appear immediately
+  useEffect(() => { if (syncedAt > 0) { fetchContacts(); preloadLastMessages() } }, [syncedAt]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { fetchMessages(); const iv = setInterval(fetchMessages, 5000); return () => clearInterval(iv) }, [selectedContact])
   useEffect(() => {
     if (sessionStatus.status !== 'connected') return

@@ -74,8 +74,9 @@ export function AppProvider({ children }) {
   const [sessionStatus, setSessionStatus] = useState({ status: 'disconnected' })
   const [loadingSession, setLoadingSession] = useState(true)
   const [accountKey, setAccountKey] = useState(0)
+  // Bumped after each contacts sync — lets pages refetch without a full remount
+  const [syncedAt, setSyncedAt] = useState(0)
   const prevStatusRef = useRef('disconnected')
-  // Seed from localStorage so account-switch detection survives page refreshes
   const prevPhoneRef = useRef(localStorage.getItem('wa_active_phone') || null)
 
   const refreshSessionStatus = useCallback(async () => {
@@ -108,7 +109,9 @@ export function AppProvider({ children }) {
         const now = Date.now()
         if (!lastSync || now - parseInt(lastSync, 10) > 30 * 60 * 1000) {
           localStorage.setItem('wa_last_sync', String(now))
-          contactsApi.sync().catch(() => {})
+          contactsApi.sync()
+            .then(() => setSyncedAt(Date.now()))   // signal pages to refetch
+            .catch(() => {})
         }
       } else if (data.status !== 'connected') {
         // Just logged out / disconnected — clear all cached account data
@@ -148,6 +151,7 @@ export function AppProvider({ children }) {
       refreshSessionStatus,
       loadingSession,
       accountKey,
+      syncedAt,
     }}>
       {children}
     </AppContext.Provider>

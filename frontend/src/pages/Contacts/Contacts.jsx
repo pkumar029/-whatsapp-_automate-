@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Users, Plus, Search, Edit2, Trash2, Phone, X, Check, RefreshCw, WifiOff, Megaphone, User, EyeOff, Eye, Download, Upload, Mail } from 'lucide-react'
 import { contactsApi, whatsappApi } from '../../services/api'
+import { useApp } from '../../context/AppContext'
 import { Link } from 'react-router-dom'
 import { formatISTDate } from '../../utils/date'
 import { getErrorMessage } from '../../utils/error'
@@ -90,6 +91,8 @@ function ContactModal({ contact, onClose, onSave }) {
 
 // ─── Main Contacts Page ───────────────────────────────────────
 export default function Contacts() {
+  const { syncedAt } = useApp()
+
   const [contacts, setContacts] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -111,22 +114,8 @@ export default function Contacts() {
   // Filter states
   const [filterType, setFilterType] = useState('all')
 
-  // WhatsApp connection states
-  const [sessionStatus, setSessionStatus] = useState({ status: 'disconnected' })
-  const [loadingSession, setLoadingSession] = useState(true)
-
-  useEffect(() => {
-    whatsappApi.getStatus().then(async res => {
-      setSessionStatus(res.data)
-      setLoadingSession(false)
-      if (res.data?.status === 'connected') {
-        try { await contactsApi.sync() } catch {}
-      }
-    }).catch(() => {
-      setSessionStatus({ status: 'disconnected' })
-      setLoadingSession(false)
-    })
-  }, [])
+  // Use AppContext session so this page reacts to connect/disconnect immediately
+  const { sessionStatus, loadingSession } = useApp()
 
   const fetchContacts = useCallback(async () => {
     setLoading(true)
@@ -159,6 +148,11 @@ export default function Contacts() {
     const timer = setTimeout(fetchContacts, 300)
     return () => clearTimeout(timer)
   }, [fetchContacts])
+
+  // Refetch when AppContext signals that a background sync has completed
+  useEffect(() => {
+    if (syncedAt > 0) fetchContacts()
+  }, [syncedAt]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // After contacts load, fetch profile pics for visible contacts
   useEffect(() => {

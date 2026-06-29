@@ -47,7 +47,10 @@ async def create_contact(data: ContactCreate, db: Session = Depends(get_db)):
 @router.get("/search")
 async def search_contacts(q: str = Query(..., min_length=1), db: Session = Depends(get_db)):
     """Search contacts by name, phone, or email."""
-    result = contacts_service.get_contacts(db, search=q, limit=10)
+    from models.models import WhatsappSession, SessionStatus
+    session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
+    wa_account = session.phone if session else None
+    result = contacts_service.get_contacts(db, search=q, limit=10, wa_account=wa_account)
     return result["contacts"]
 
 
