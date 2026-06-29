@@ -9,7 +9,7 @@ import {
   Keyboard, AlertCircle, CheckCircle2, Zap, Database,
   Image as ImageIcon, Archive, FileDown, Trash2, ScrollText
 } from 'lucide-react'
-import { whatsappApi, logsApi } from '../../services/api'
+import { whatsappApi, logsApi, authApi } from '../../services/api'
 import { useApp } from '../../context/AppContext'
 import { formatIST } from '../../utils/date'
 import { getBrowserInfo, getSessionStart } from '../../utils/browser'
@@ -873,10 +873,149 @@ function NavItem({ n, active, isMobile, onClick }) {
   )
 }
 
+// ─── Section: Security (SMS OTP login) ──────────────────────────
+function SecuritySection() {
+  const [cfg, setCfg] = useState({ sms_provider: '', sms_api_key: '', sms_from: '', sms_custom_url: '', auth_allowed_phones: '' })
+  const [testPhone, setTestPhone] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [testMsg, setTestMsg] = useState('')
+
+  useEffect(() => {
+    authApi.getSmsSettings().then(r => { setCfg(r.data); setLoading(false) }).catch(() => setLoading(false))
+  }, [])
+
+  const save = async () => {
+    setSaving(true); setMsg('')
+    try {
+      await authApi.saveSmsSettings(cfg)
+      setMsg('✓ Settings saved')
+    } catch { setMsg('✗ Save failed') } finally { setSaving(false) }
+  }
+
+  const testSms = async () => {
+    if (!testPhone.trim()) return
+    setTesting(true); setTestMsg('')
+    try {
+      const r = await authApi.testSms(testPhone.trim())
+      setTestMsg(r.data?.message || 'Sent!')
+      if (r.data?.dev_otp) setTestMsg(`OTP: ${r.data.dev_otp} (no SMS provider configured)`)
+    } catch (e) {
+      setTestMsg(e.response?.data?.detail || 'Test failed')
+    } finally { setTesting(false) }
+  }
+
+  const inp = (field) => ({
+    value: cfg[field] || '',
+    onChange: e => setCfg(p => ({ ...p, [field]: e.target.value })),
+    style: { width: '100%', background: WA.input, border: `1px solid ${WA.border}`, borderRadius: 8, color: WA.text, fontSize: 13, padding: '8px 12px', outline: 'none', boxSizing: 'border-box' }
+  })
+
+  if (loading) return <div style={{ padding: 32, color: WA.sub }}>Loading...</div>
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+      <div style={{ padding: '20px 24px', borderBottom: `1px solid ${WA.border}` }}>
+        <div style={{ fontSize: 17, fontWeight: 700, color: WA.text, marginBottom: 4 }}>Security — SMS OTP Login</div>
+        <div style={{ fontSize: 12, color: WA.sub, lineHeight: 1.6 }}>
+          Configure the SMS gateway used to send OTP codes when logging into this app.<br />
+          Without a provider, the OTP is shown on-screen (development mode only).
+        </div>
+      </div>
+
+      <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+
+        {/* Provider */}
+        <div>
+          <label style={{ display: 'block', fontSize: 12, color: WA.sub, marginBottom: 6 }}>SMS Provider</label>
+          <select value={cfg.sms_provider || ''} onChange={e => setCfg(p => ({ ...p, sms_provider: e.target.value }))}
+            style={{ ...inp('sms_provider').style, appearance: 'none', paddingRight: 28, cursor: 'pointer' }}>
+            <option value="">None (show OTP on screen)</option>
+            <option value="fast2sms">Fast2SMS (India — free tier available)</option>
+            <option value="twilio">Twilio</option>
+            <option value="custom">Custom GET URL</option>
+          </select>
+        </div>
+
+        {/* Provider-specific fields */}
+        {cfg.sms_provider === 'fast2sms' && (
+          <div style={{ background: 'rgba(37,211,102,0.05)', border: `1px solid rgba(37,211,102,0.15)`, borderRadius: 10, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 12, color: WA.sub }}>
+              Get a free API key at <strong style={{ color: WA.text }}>fast2sms.com</strong> → Dashboard → Dev API
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: WA.sub, marginBottom: 4 }}>Fast2SMS API Key</label>
+              <input {...inp('sms_api_key')} placeholder="Paste your Fast2SMS API key here" />
+            </div>
+          </div>
+        )}
+
+        {cfg.sms_provider === 'twilio' && (
+          <div style={{ background: 'rgba(99,102,241,0.05)', border: `1px solid rgba(99,102,241,0.2)`, borderRadius: 10, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: WA.sub, marginBottom: 4 }}>API Key (format: ACCOUNT_SID:AUTH_TOKEN)</label>
+              <input {...inp('sms_api_key')} placeholder="ACxxxxxxxx:your_auth_token" />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: WA.sub, marginBottom: 4 }}>Twilio From Number</label>
+              <input {...inp('sms_from')} placeholder="+1415xxxxxxx" />
+            </div>
+          </div>
+        )}
+
+        {cfg.sms_provider === 'custom' && (
+          <div style={{ background: 'rgba(6,182,212,0.05)', border: `1px solid rgba(6,182,212,0.2)`, borderRadius: 10, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 12, color: WA.sub }}>
+              A GET request is made to this URL with <code style={{ color: WA.text }}>{'{phone}'}</code> and <code style={{ color: WA.text }}>{'{otp}'}</code> replaced.
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: WA.sub, marginBottom: 4 }}>Custom SMS URL</label>
+              <input {...inp('sms_custom_url')} placeholder="https://api.example.com/send?to={phone}&msg={otp}" />
+            </div>
+          </div>
+        )}
+
+        {/* Allowed phones */}
+        <div>
+          <label style={{ display: 'block', fontSize: 12, color: WA.sub, marginBottom: 4 }}>Allowed Phone Numbers (comma-separated)</label>
+          <input {...inp('auth_allowed_phones')} placeholder="+919876543210, +919876543211" />
+          <div style={{ fontSize: 11, color: WA.sub, marginTop: 4 }}>Leave empty to allow any phone number to request OTP.</div>
+        </div>
+
+        {/* Save */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button onClick={save} disabled={saving}
+            style={{ height: 36, padding: '0 20px', background: WA.green, border: 'none', borderRadius: 8, color: '#000', fontWeight: 700, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+            {saving ? <><RefreshCw size={13} style={{ animation: 'spin 1s linear infinite' }} /> Saving...</> : 'Save Settings'}
+          </button>
+          {msg && <span style={{ fontSize: 12, color: msg.startsWith('✓') ? WA.green : WA.red }}>{msg}</span>}
+        </div>
+
+        {/* Test SMS */}
+        <div style={{ borderTop: `1px solid ${WA.border}`, paddingTop: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: WA.text, marginBottom: 8 }}>Test SMS</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input value={testPhone} onChange={e => setTestPhone(e.target.value)} placeholder="+91 9876543210"
+              style={{ flex: 1, background: WA.input, border: `1px solid ${WA.border}`, borderRadius: 8, color: WA.text, fontSize: 13, padding: '8px 12px', outline: 'none' }} />
+            <button onClick={testSms} disabled={testing || !testPhone.trim()}
+              style={{ height: 36, padding: '0 16px', background: 'rgba(37,211,102,0.12)', border: `1px solid rgba(37,211,102,0.3)`, borderRadius: 8, color: WA.green, fontWeight: 600, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
+              {testing ? <><RefreshCw size={13} style={{ animation: 'spin 1s linear infinite' }} /> Sending...</> : <><Send size={13} /> Send Test</>}
+            </button>
+          </div>
+          {testMsg && <div style={{ fontSize: 12, color: testMsg.includes('OTP:') ? '#fbbf24' : WA.green, marginTop: 8 }}>{testMsg}</div>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Nav sections config ─────────────────────────────────────────
 const NAV = [
   { id: 'profile',       icon: UserCircle,    label: 'Profile',            color: '#128C7E' },
   { id: 'account',       icon: Shield,        label: 'Account',            color: '#0a7aff' },
+  { id: 'security',      icon: Key,           label: 'Security',           color: '#ef4444' },
   { id: 'privacy',       icon: Lock,          label: 'Privacy',            color: '#6366f1' },
   { id: 'chats',         icon: MessageSquare, label: 'Chats',              color: '#f59e0b' },
   { id: 'notifications', icon: Bell,          label: 'Notifications',      color: '#25D366' },
@@ -888,6 +1027,7 @@ const NAV = [
 const SECTION_COMPONENTS = {
   profile: ProfileSection,
   account: AccountSection,
+  security: SecuritySection,
   privacy: PrivacySection,
   chats: ChatsSection,
   notifications: NotificationsSection,

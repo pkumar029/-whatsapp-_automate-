@@ -42,6 +42,9 @@ export const authApi = {
   verifyOtp: (phone, otp) => api.post('/auth/verify-otp', { phone, otp }),
   me: () => api.get('/auth/me'),
   logout: () => api.post('/auth/logout'),
+  getSmsSettings: () => api.get('/auth/sms-settings'),
+  saveSmsSettings: (data) => api.put('/auth/sms-settings', data),
+  testSms: (phone) => api.post('/auth/test-sms', { phone }),
 }
 
 // ─── WhatsApp API ─────────────────────────────────────────────

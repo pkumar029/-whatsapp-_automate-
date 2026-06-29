@@ -67,3 +67,46 @@ def _extract_token(authorization: Optional[str]) -> Optional[str]:
     if authorization and authorization.startswith("Bearer "):
         return authorization[7:]
     return None
+
+
+# ── SMS Settings ──────────────────────────────────────────────────────────────
+
+class SMSSettings(BaseModel):
+    sms_provider: str = ""      # fast2sms | twilio | custom | ""
+    sms_api_key: str = ""
+    sms_from: str = ""
+    sms_custom_url: str = ""
+    auth_allowed_phones: str = ""  # comma-separated list of allowed phones
+
+
+@router.get("/sms-settings")
+async def get_sms_settings(db: Session = Depends(get_db)):
+    """Return current SMS / security settings."""
+    from models.models import SystemSettings
+    keys = ["sms_provider", "sms_api_key", "sms_from", "sms_custom_url", "auth_allowed_phones"]
+    rows = db.query(SystemSettings).filter(SystemSettings.key.in_(keys)).all()
+    cfg = {r.key: r.value or "" for r in rows}
+    return {k: cfg.get(k, "") for k in keys}
+
+
+@router.put("/sms-settings")
+async def save_sms_settings(data: SMSSettings, db: Session = Depends(get_db)):
+    """Save SMS / security settings."""
+    from models.models import SystemSettings
+    fields = data.dict()
+    for key, value in fields.items():
+        row = db.query(SystemSettings).filter(SystemSettings.key == key).first()
+        if row:
+            row.value = value
+        else:
+            db.add(SystemSettings(key=key, value=value))
+    db.commit()
+    return {"success": True, "message": "Settings saved"}
+
+
+@router.post("/test-sms")
+async def test_sms(data: OTPRequest, db: Session = Depends(get_db)):
+    """Send a test OTP to the given phone to verify SMS configuration."""
+    otp = auth_service.request_otp(data.phone.strip())
+    result = auth_service.send_otp_sms(data.phone.strip(), otp, db)
+    return result
