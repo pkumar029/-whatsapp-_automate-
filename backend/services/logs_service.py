@@ -20,7 +20,7 @@ def get_log_settings(db: Session) -> dict:
     data = {r.key: r.value for r in rows}
     return {
         "logging_enabled": data.get(_LOG_ENABLED_KEY, "true") != "false",
-        "max_log_entries": int(data.get(_LOG_MAX_ENTRIES_KEY, "0") or "0"),
+        "max_log_entries": int(data.get(_LOG_MAX_ENTRIES_KEY, "100") or "100"),
     }
 
 
@@ -88,6 +88,12 @@ def get_logs(
     status: Optional[str] = None,
     automation_id: Optional[int] = None,
 ) -> dict:
+    # Auto-maintenance: trim to configured max on every fetch (cheap no-op when under limit)
+    cfg = get_log_settings(db)
+    max_entries = cfg["max_log_entries"]
+    if max_entries > 0:
+        trim_to_limit(db, max_entries)
+
     query = db.query(AutomationLog)
 
     if status:
