@@ -168,6 +168,45 @@ WA-005/whatsapp-auth-integration
 
 ---
 
+## 📋 Changelog
+
+### v2.1.0 — Account Isolation & Login Reliability (2026-06-29)
+
+#### ✅ Multi-Account Data Isolation
+- Every contact and message is tagged with `wa_account` (the connected phone number).
+- Strict per-account filter: each WhatsApp number sees only its own data.
+- `claim_orphan_contacts()` automatically adopts any legacy NULL-owner contacts when an account first connects.
+- Switching accounts increments `accountKey` in AppContext, cleanly remounting the entire UI so no stale data bleeds through.
+
+#### ✅ Dynamic Data Synchronization
+- `syncedAt` signal in AppContext: bumped after each background contacts sync.
+- Contacts and Messages pages watch `syncedAt` and refetch automatically — no manual refresh needed after login.
+- Both pages now read `sessionStatus` and `loadingSession` from AppContext instead of managing their own separate polling loops.
+
+#### ✅ Dashboard Fix
+- Dashboard connected to global `sessionStatus` from AppContext.
+- Statistics reload automatically after QR connection, logout, or account switch.
+
+#### ✅ WhatsApp Bridge — Session Persistence
+- Removed `clearSessionFiles()` from `initClient()` and `/disconnect` — the same account no longer requires a new QR scan on every reconnect.
+- Added explicit `POST /whatsapp/clear-session` → `POST /clear-session` on the bridge for intentional account switching.
+- "Use a different WhatsApp number" button (removed later per preference) invoked the clear-session flow.
+
+#### ✅ Login Page Improvements
+- Splash screen click moved onto the button (`type="button"`) — fixes stuck splash on some browsers.
+- Cancel & Start Over navigates immediately (sync) to the method picker; disconnect runs fire-and-forget.
+- Fallback useEffect now handles all non-connected/non-connecting states (covers bridge error state).
+- Mount useEffect resets all stale QR/pairing state so opening login always shows a clean splash.
+- Bridge connection now detects an already-connected session immediately on connect response and navigates to dashboard without waiting for the next poll.
+- Poll interval reduced from 3 s to 2 s; navigate is triggered directly in the poll callback rather than waiting for a useEffect dependency cycle.
+
+#### ✅ Bridge `/connect` Fix
+- `connect_whatsapp_with_config` now checks the bridge's immediate status response after calling `/connect`.
+- If the bridge reports `"connected"` (LocalAuth saved session), the backend updates the DB and returns `"connected"` straight away instead of always returning `"connecting"`.
+- `pairing_code` is now included in the initial `"connecting"` response.
+
+---
+
 ## 📄 License
 
 MIT License — see [LICENSE](LICENSE) for details.
