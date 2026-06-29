@@ -41,6 +41,7 @@ export const whatsappApi = {
   getStatus: () => api.get('/whatsapp/status'),
   connect: (data) => api.post('/whatsapp/connect', data),
   disconnect: () => api.post('/whatsapp/disconnect'),
+  clearSession: () => api.post('/whatsapp/clear-session'),
   sendMessage: (data) => api.post('/whatsapp/send', data),
   getQR: () => api.get('/whatsapp/qr'),
 }

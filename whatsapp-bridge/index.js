@@ -69,9 +69,6 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
         } catch (e) {
             console.error('Error destroying client:', e);
         }
-        // Clear saved session so a fresh QR/pairing is required (prevents old account from
-        // being auto-restored by LocalAuth when switching to a different number)
-        clearSessionFiles();
     }
 
     // Clean lock file before restarting to prevent EBUSY/locked session folder errors
@@ -287,7 +284,6 @@ app.post('/connect', async (req, res) => {
 app.post('/disconnect', async (req, res) => {
     if (!client) {
         clientStatus = 'disconnected';
-        clearSessionFiles();
         return res.json({ success: true, message: 'No client session to disconnect' });
     }
 
@@ -302,15 +298,20 @@ app.post('/disconnect', async (req, res) => {
         } catch (ee) {}
     }
 
-    // Always clear saved session files so the next /connect starts with a fresh QR/pairing.
-    // This ensures switching to a different WhatsApp account works correctly.
-    clearSessionFiles();
-
     client = null;
     clientStatus = 'disconnected';
     qrCodeBase64 = null;
     connectedPhone = null;
+    // Session files are intentionally kept so the same account can reconnect without a new QR.
+    // Call POST /clear-session explicitly when switching to a different WhatsApp number.
     res.json({ success: true, message: 'Client disconnected successfully' });
+});
+
+// Explicitly wipe saved session so next connect requires a fresh QR / pairing code.
+// Use this when the user wants to switch to a different WhatsApp number.
+app.post('/clear-session', (req, res) => {
+    clearSessionFiles();
+    res.json({ success: true, message: 'Session cleared — next connect will require QR or pairing code' });
 });
 
 app.post('/send', async (req, res) => {

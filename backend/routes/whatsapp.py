@@ -35,6 +35,13 @@ async def disconnect(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/clear-session")
+async def clear_session():
+    """Wipe the bridge's saved WhatsApp session so the next connect requires a new QR/pairing.
+    Only call this when the user explicitly wants to switch to a different WhatsApp number."""
+    return whatsapp_service.clear_bridge_session()
+
+
 @router.post("/send")
 async def send_message(data: WhatsAppSendRequest, db: Session = Depends(get_db)):
     """Send a WhatsApp message directly."""

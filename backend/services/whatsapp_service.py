@@ -251,6 +251,23 @@ def disconnect_whatsapp(db: Session) -> dict:
         raise
 
 
+def clear_bridge_session() -> dict:
+    """Tell the bridge to wipe its saved LocalAuth session.
+
+    Should be called when the user explicitly wants to switch to a different
+    WhatsApp account.  Normal disconnect/reconnect does NOT call this so that
+    the same number can reconnect without scanning a new QR code.
+    """
+    try:
+        import httpx
+        r = httpx.post("http://localhost:7002/clear-session", timeout=5.0)
+        r.raise_for_status()
+        return {"success": True, "message": "Bridge session cleared"}
+    except Exception as e:
+        logger.warning(f"Failed to clear bridge session: {e}")
+        return {"success": False, "message": str(e)}
+
+
 def send_whatsapp_message(db: Session, phone: str, message: str) -> dict:
     """Send a WhatsApp message based on connection type."""
     logger.info(f"Sending WhatsApp message to {phone}")

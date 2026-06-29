@@ -44,6 +44,7 @@ export default function Login() {
   const [metaBusinessAccountId, setMetaBusinessAccountId] = useState('')
 
   const [connecting, setConnecting] = useState(false)
+  const [clearingSession, setClearingSession] = useState(false)
   const [qrCode, setQrCode] = useState(null)
   const [pairingCode, setPairingCode] = useState(null)
   const [message, setMessage] = useState('')
@@ -110,6 +111,18 @@ export default function Login() {
     setView('form')
     setMessage('')
     setErrorMsg('')
+  }
+
+  const handleSwitchAccount = async () => {
+    setClearingSession(true)
+    setErrorMsg('')
+    try {
+      await whatsappApi.clearSession()
+    } catch {
+      // ignore — session files may already be absent
+    } finally {
+      setClearingSession(false)
+    }
   }
 
   const handleConnect = async (e) => {
@@ -236,9 +249,22 @@ export default function Login() {
             ))}
           </div>
 
-          <button className="btn btn-secondary" onClick={() => setView('splash')} style={{ width: '100%', marginTop: 16, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', color: 'var(--text-secondary)' }}>
-            <ChevronLeft size={14} /> Back
-          </button>
+          <div style={{ marginTop: 20, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* Switch account — wipes saved session so next connect requires new QR */}
+            <button
+              className="switch-account-btn"
+              onClick={handleSwitchAccount}
+              disabled={clearingSession}
+            >
+              {clearingSession
+                ? <><RefreshCw size={13} style={{ animation: 'spin 1s linear infinite' }} /> Clearing session...</>
+                : '⇄ Use a different WhatsApp number'}
+            </button>
+
+            <button className="btn btn-secondary" onClick={() => setView('splash')} style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', color: 'var(--text-secondary)' }}>
+              <ChevronLeft size={14} /> Back
+            </button>
+          </div>
         </div>
       )}
 
@@ -481,6 +507,10 @@ export default function Login() {
         .link-method-card.active .link-method-radio { border-color: var(--accent-primary); }
         .link-method-radio-inner { width: 10px; height: 10px; border-radius: 50%; background: transparent; }
         .link-method-card.active .link-method-radio-inner { background: var(--accent-primary); }
+
+        .switch-account-btn { width: 100%; padding: 9px 12px; background: transparent; border: 1px dashed rgba(255,255,255,0.12); border-radius: var(--radius-md); color: var(--text-muted); font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: border-color 0.15s, color 0.15s; }
+        .switch-account-btn:hover:not(:disabled) { border-color: rgba(239,68,68,0.4); color: #f87171; }
+        .switch-account-btn:disabled { opacity: 0.5; cursor: not-allowed; }
       `}</style>
     </div>
   )
