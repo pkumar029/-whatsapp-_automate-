@@ -91,7 +91,7 @@ export function AppProvider({ children }) {
       // different account AFTER a disconnect is still caught.
       if (newPhone && prevPhoneRef.current && newPhone !== prevPhoneRef.current) {
         // Clear all account-scoped caches so new account starts clean
-        const clearKeys = ['wa_last_sync', 'wa_session_start', 'wa_favourites', 'wa_pinned', 'wa_archived']
+        const clearKeys = ['wa_last_sync', 'wa_session_start', 'wa_favourites', 'wa_pinned', 'wa_archived', 'wa_last_phone']
         clearKeys.forEach(k => localStorage.removeItem(k))
         setAccountKey(k => k + 1)
       }

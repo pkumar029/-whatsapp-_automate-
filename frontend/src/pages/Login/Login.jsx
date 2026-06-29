@@ -50,12 +50,31 @@ export default function Login() {
   const [errorMsg, setErrorMsg] = useState('')
   const [backendOk, setBackendOk] = useState(null) // null=checking, true, false
 
+  // On mount: always reset to clean splash state — no stale QR / old view from previous session
+  useEffect(() => {
+    setView('splash')
+    setQrCode(null)
+    setPairingCode(null)
+    setMessage('')
+    setErrorMsg('')
+    setPhone('')  // don't pre-fill old phone number when switching accounts
+  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+
   // Redirect to dashboard as soon as WhatsApp is connected
   useEffect(() => {
     if (sessionStatus.status === 'connected') {
       navigate('/dashboard')
     }
   }, [sessionStatus.status, navigate])
+
+  // If session drops back to disconnected while on the connecting screen, return to method picker
+  useEffect(() => {
+    if (sessionStatus.status === 'disconnected' && view === 'connecting') {
+      setView('method')
+      setQrCode(null)
+      setPairingCode(null)
+    }
+  }, [sessionStatus.status, view])
 
   // Backend connectivity check
   useEffect(() => {
