@@ -686,6 +686,35 @@ app.get('/profile-pic', async (req, res) => {
     }
 });
 
+// GET /my-profile — returns the connected account's own WhatsApp profile
+app.get('/my-profile', async (req, res) => {
+    if (clientStatus !== 'connected' || !client) {
+        return res.status(400).json({ success: false, error: 'Not connected' });
+    }
+    try {
+        const info = client.info;
+        const wid = info && info.wid ? info.wid : null;
+        const phone = wid ? ('+' + wid.user) : connectedPhone;
+        const name = (info && info.pushname) || phone;
+
+        let profilePic = null;
+        try {
+            const jid = wid ? wid._serialized : (phone.replace('+', '') + '@c.us');
+            profilePic = await client.getProfilePicUrl(jid);
+        } catch (_) { /* no pic or private */ }
+
+        res.json({
+            success: true,
+            name,
+            phone,
+            profile_pic: profilePic || null,
+            wid: wid ? wid._serialized : null,
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
 // GET /sync-messages — full chat history for all chats (used on login to backfill DB)
 app.get('/sync-messages', async (req, res) => {
     if (clientStatus !== 'connected' || !client) {

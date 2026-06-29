@@ -79,6 +79,14 @@ export function AppProvider({ children }) {
   const prevStatusRef = useRef('disconnected')
   const prevPhoneRef = useRef(localStorage.getItem('wa_active_phone') || null)
 
+  // WhatsApp profile for the connected account (name, phone, profilePicUrl)
+  const [waProfile, setWaProfile] = useState(() => {
+    try {
+      const saved = localStorage.getItem('wa_whatsapp_profile')
+      return saved ? JSON.parse(saved) : null
+    } catch { return null }
+  })
+
   const refreshSessionStatus = useCallback(async () => {
     try {
       const res = await whatsappApi.getStatus()
@@ -92,7 +100,7 @@ export function AppProvider({ children }) {
       // different account AFTER a disconnect is still caught.
       if (newPhone && prevPhoneRef.current && newPhone !== prevPhoneRef.current) {
         // Clear all account-scoped caches so new account starts clean
-        const clearKeys = ['wa_last_sync', 'wa_session_start', 'wa_favourites', 'wa_pinned', 'wa_archived', 'wa_last_phone']
+        const clearKeys = ['wa_last_sync', 'wa_session_start', 'wa_favourites', 'wa_pinned', 'wa_archived', 'wa_last_phone', 'wa_whatsapp_profile']
         clearKeys.forEach(k => localStorage.removeItem(k))
         setAccountKey(k => k + 1)
       }
@@ -105,6 +113,23 @@ export function AppProvider({ children }) {
       if (data.status === 'connected' && prevStatusRef.current !== 'connected') {
         prevStatusRef.current = 'connected'
         setAccountKey(k => k + 1)
+
+        // Fetch WhatsApp profile (non-blocking)
+        whatsappApi.getProfile().then(res => {
+          const p = res.data
+          if (p && p.success) {
+            const profileData = {
+              name: p.name,
+              phone: p.phone || p.wa_account,
+              profilePicUrl: p.profile_pic_url || null,
+              about: p.about || null,
+              wid: p.wid || null,
+            }
+            setWaProfile(profileData)
+            localStorage.setItem('wa_whatsapp_profile', JSON.stringify(profileData))
+          }
+        }).catch(() => {})
+
         const lastSync = localStorage.getItem('wa_last_sync')
         const now = Date.now()
         if (!lastSync || now - parseInt(lastSync, 10) > 30 * 60 * 1000) {
@@ -124,6 +149,9 @@ export function AppProvider({ children }) {
           localStorage.removeItem('wa_last_sync')
         }
         prevStatusRef.current = data.status
+        // Clear cached WA profile when disconnected
+        setWaProfile(null)
+        localStorage.removeItem('wa_whatsapp_profile')
       }
 
       return data
@@ -154,6 +182,7 @@ export function AppProvider({ children }) {
       loadingSession,
       accountKey,
       syncedAt,
+      waProfile,
     }}>
       {children}
     </AppContext.Provider>

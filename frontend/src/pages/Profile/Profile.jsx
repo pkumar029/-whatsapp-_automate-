@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   User, Mail, Building2, Briefcase, Camera, Save,
-  Lock, Eye, EyeOff, CheckCircle2, AlertCircle, Phone, Shield
+  Lock, Eye, EyeOff, CheckCircle2, AlertCircle, Phone, Shield, MessageCircle
 } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 
@@ -71,7 +71,7 @@ function Toast({ msg, type }) {
 }
 
 export default function Profile() {
-  const { profile, updateProfile, changePassword, sessionStatus } = useApp()
+  const { profile, updateProfile, changePassword, sessionStatus, waProfile } = useApp()
   const navigate = useNavigate()
   const fileRef = useRef(null)
 
@@ -104,9 +104,7 @@ export default function Profile() {
     const file = e.target.files[0]
     if (!file) return
     const reader = new FileReader()
-    reader.onload = (ev) => {
-      setAvatar(ev.target.result)
-    }
+    reader.onload = (ev) => setAvatar(ev.target.result)
     reader.readAsDataURL(file)
   }
 
@@ -151,7 +149,73 @@ export default function Profile() {
   return (
     <div style={{ maxWidth: 700, margin: '0 auto', paddingBottom: 40 }}>
 
-      {/* ── Avatar + Name banner ── */}
+      {/* ── WhatsApp Profile Banner ── */}
+      {waProfile && (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(37,211,102,0.08) 0%, rgba(18,140,126,0.08) 100%)',
+          border: '1px solid rgba(37,211,102,0.25)',
+          borderRadius: 16,
+          padding: '24px 28px',
+          marginBottom: 20,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 20,
+          flexWrap: 'wrap',
+        }}>
+          {/* WhatsApp profile picture */}
+          <div style={{
+            width: 72, height: 72, borderRadius: '50%',
+            background: 'linear-gradient(135deg, #25D366, #128C7E)',
+            border: '3px solid rgba(37,211,102,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 28, fontWeight: 700, color: '#fff',
+            overflow: 'hidden', flexShrink: 0,
+          }}>
+            {waProfile.profilePicUrl
+              ? <img
+                  src={waProfile.profilePicUrl}
+                  alt={waProfile.name || 'WA'}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  onError={e => { e.target.style.display = 'none' }}
+                />
+              : (waProfile.name ? waProfile.name.charAt(0).toUpperCase() : 'W')}
+          </div>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+              <MessageCircle size={14} color="#25D366" />
+              <span style={{ fontSize: 11, fontWeight: 600, color: '#25D366', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Connected WhatsApp Account
+              </span>
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {waProfile.name || 'Unknown'}
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+              {waProfile.phone || sessionStatus?.phone}
+            </div>
+            {waProfile.about && (
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, fontStyle: 'italic' }}>
+                "{waProfile.about}"
+              </div>
+            )}
+          </div>
+
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '5px 12px', borderRadius: 20, fontSize: 12, flexShrink: 0,
+            background: 'rgba(37,211,102,0.12)',
+            color: '#25D366',
+            border: '1px solid rgba(37,211,102,0.3)',
+            fontWeight: 600,
+          }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#25D366', display: 'inline-block' }} />
+            Connected
+          </div>
+        </div>
+      )}
+
+      {/* ── Avatar + App Name banner ── */}
       <div style={{
         background: 'linear-gradient(135deg, #1a2634 0%, #0d1117 100%)',
         border: '1px solid var(--border-primary)',
@@ -163,7 +227,6 @@ export default function Profile() {
         gap: 24,
         flexWrap: 'wrap',
       }}>
-        {/* Avatar circle */}
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <div style={{
             width: 90, height: 90, borderRadius: '50%',
@@ -224,8 +287,8 @@ export default function Profile() {
             <User size={18} color="#25D366" />
           </div>
           <div>
-            <div style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)' }}>Profile Information</div>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Update your personal details</div>
+            <div style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)' }}>App Profile</div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Your display name and details within this app</div>
           </div>
         </div>
 
@@ -271,8 +334,11 @@ export default function Profile() {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <FormField label="WhatsApp Name" icon={User}>
+            <Input value={waProfile?.name || '—'} readOnly />
+          </FormField>
           <FormField label="Phone Number" icon={Phone}>
-            <Input value={sessionStatus?.phone || '—'} readOnly />
+            <Input value={waProfile?.phone || sessionStatus?.phone || '—'} readOnly />
           </FormField>
           <FormField label="Connection Status" icon={Shield}>
             <Input value={
@@ -281,6 +347,11 @@ export default function Profile() {
               : 'Disconnected'
             } readOnly />
           </FormField>
+          {waProfile?.wid && (
+            <FormField label="WhatsApp ID (JID)" icon={Shield}>
+              <Input value={waProfile.wid} readOnly />
+            </FormField>
+          )}
         </div>
 
         <div style={{ marginTop: 14 }}>

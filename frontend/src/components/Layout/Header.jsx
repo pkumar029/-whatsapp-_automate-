@@ -1,8 +1,6 @@
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Bell, RefreshCw, Sun, Moon, Menu } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
-import { useState, useEffect } from 'react'
-import { whatsappApi } from '../../services/api'
 
 const pageMeta = {
   '/dashboard':   { title: 'Dashboard',       subtitle: 'Your automation overview' },
@@ -19,29 +17,16 @@ export default function Header({ onMenuToggle }) {
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const meta = pageMeta[pathname] || { title: 'WhatsApp Automate', subtitle: '' }
-  const { theme, toggleTheme, profile } = useApp()
-  const [isConnected, setIsConnected] = useState(false)
+  const { theme, toggleTheme, profile, sessionStatus, waProfile } = useApp()
 
-  useEffect(() => {
-    const checkStatus = async () => {
-      try {
-        const res = await whatsappApi.getStatus()
-        setIsConnected(res.data.status === 'connected')
-      } catch {
-        setIsConnected(false)
-      }
-    }
-    checkStatus()
-    const interval = setInterval(checkStatus, 5000)
-    return () => clearInterval(interval)
-  }, [])
-
-  const initial = profile.name ? profile.name.charAt(0).toUpperCase() : 'A'
+  const isConnected = sessionStatus?.status === 'connected'
+  const displayName = waProfile?.name || profile.name || 'User'
+  const picUrl = waProfile?.profilePicUrl || profile.avatar || null
+  const initial = displayName.charAt(0).toUpperCase()
 
   return (
     <header className="header">
       <div className="header-left" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        {/* Hamburger — visible on all screen sizes */}
         <button
           className="header-btn"
           onClick={onMenuToggle}
@@ -72,12 +57,17 @@ export default function Header({ onMenuToggle }) {
         {isConnected && (
           <button
             onClick={() => navigate('/profile')}
-            title={`${profile.name || 'Profile'} — click to edit`}
+            title={`${displayName} — click to view profile`}
             style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
           >
-            <div className="avatar" style={{ overflow: 'hidden' }}>
-              {profile.avatar
-                ? <img src={profile.avatar} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+            <div className="avatar" style={{ overflow: 'hidden', background: picUrl ? 'transparent' : undefined }}>
+              {picUrl
+                ? <img
+                    src={picUrl}
+                    alt={displayName}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }}
+                    onError={e => { e.target.style.display = 'none' }}
+                  />
                 : initial}
             </div>
           </button>

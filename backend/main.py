@@ -60,6 +60,18 @@ async def lifespan(app: FastAPI):
          "ALTER TABLE messages MODIFY COLUMN whatsapp_message_id VARCHAR(200) NULL"),
         ("messages whatsapp_id index",
          "ALTER TABLE messages ADD INDEX idx_message_wa_id (whatsapp_message_id)"),
+        ("whatsapp_profiles table",
+         "CREATE TABLE IF NOT EXISTS whatsapp_profiles ("
+         "  id INT AUTO_INCREMENT PRIMARY KEY,"
+         "  wa_account VARCHAR(100) NOT NULL UNIQUE,"
+         "  display_name VARCHAR(200) NULL,"
+         "  profile_pic_url TEXT NULL,"
+         "  about TEXT NULL,"
+         "  wid VARCHAR(200) NULL,"
+         "  last_synced_at DATETIME NULL,"
+         "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+         "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
+         ")"),
     ]
     for _name, _sql_str in _migrations:
         try:

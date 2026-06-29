@@ -44,6 +44,7 @@ export const whatsappApi = {
   clearSession: () => api.post('/whatsapp/clear-session'),
   sendMessage: (data) => api.post('/whatsapp/send', data),
   getQR: () => api.get('/whatsapp/qr'),
+  getProfile: () => api.get('/whatsapp/profile'),
 }
 
 // ─── Contacts API ─────────────────────────────────────────────

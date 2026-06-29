@@ -325,3 +325,19 @@ class MessageJob(Base):
         Index("idx_jobs_next_retry", "next_retry_time"),
         Index("idx_jobs_lock_time", "lock_time"),
     )
+
+
+# ─── WhatsApp Profile ─────────────────────────────────────────
+class WhatsAppProfile(Base):
+    """Stores the WhatsApp profile for each connected account (one row per phone)."""
+    __tablename__ = "whatsapp_profiles"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    wa_account = Column(String(100), unique=True, nullable=False)  # the phone number
+    display_name = Column(String(200), nullable=True)
+    profile_pic_url = Column(Text, nullable=True)
+    about = Column(Text, nullable=True)
+    wid = Column(String(200), nullable=True)
+    last_synced_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

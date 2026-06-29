@@ -42,6 +42,18 @@ async def clear_session():
     return whatsapp_service.clear_bridge_session()
 
 
+@router.get("/profile")
+async def get_whatsapp_profile(db: Session = Depends(get_db)):
+    """Get the connected WhatsApp account's own profile (name, phone, picture).
+    Fetches fresh from the bridge and upserts in DB; falls back to stored record."""
+    from models.models import WhatsappSession, SessionStatus as SS
+    session = db.query(WhatsappSession).filter(WhatsappSession.status == SS.connected).first()
+    if not session or not session.phone:
+        raise HTTPException(status_code=400, detail="No active WhatsApp session")
+    from services.profile_service import fetch_and_save_profile
+    return fetch_and_save_profile(db, session.phone)
+
+
 @router.post("/send")
 async def send_message(data: WhatsAppSendRequest, db: Session = Depends(get_db)):
     """Send a WhatsApp message directly."""
