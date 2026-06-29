@@ -408,12 +408,18 @@ app.get('/contacts', async (req, res) => {
         const cleanContacts = Array.from(contactMap.values())
             .filter(c => {
                 if (!c.id || !c.id._serialized) return false;
+                const server = c.id.server || '';
                 const jid = c.id._serialized;
+
+                // Exclude WhatsApp-internal non-contact servers
+                if (server === 'lid') return false;        // device-linked IDs (fake phone numbers)
+                if (server === 'newsletter') return false; // WhatsApp Channels
+                if (server === 'broadcast') return false;  // broadcast lists
+
                 const isGroup = c.isGroup || jid.endsWith('@g.us');
-                const isBroadcast = jid.endsWith('@broadcast') || (c.id && c.id.server === 'broadcast');
-                if (isBroadcast) return false;
                 if (isGroup) return true;
-                // Include contacts in address book, active chats, or any valid WhatsApp contact
+
+                // For regular user contacts: must be a saved/active/known WhatsApp contact
                 return c.isMyContact === true || c.fromActiveChat === true || c.isWAContact === true;
             })
             .map(c => {
@@ -421,8 +427,6 @@ app.get('/contacts', async (req, res) => {
                 let type = 'User';
                 if (c.isGroup || jid.endsWith('@g.us')) {
                     type = 'Group';
-                } else if (jid.endsWith('@broadcast') || (c.id && c.id.server === 'broadcast')) {
-                    type = 'Broadcast';
                 }
 
                 let phone = jid;
@@ -440,13 +444,15 @@ app.get('/contacts', async (req, res) => {
                     }
                 }
 
-                return {
-                    name: name,
-                    phone: phone,
-                    type: type
-                };
+                return { name, phone, type };
             })
-            .filter(c => c.phone && c.name);
+            .filter(c => {
+                if (!c.phone || !c.name) return false;
+                if (c.type === 'Group') return true;
+                // User contacts: must be E.164 format with 7–13 digits
+                // Numbers longer than 13 digits are WhatsApp-internal pseudo-IDs
+                return /^\+\d{7,13}$/.test(c.phone);
+            });
         
         console.log(`Fetched ${cleanContacts.length} total contacts (including groups and broadcasts)`);
         res.json({

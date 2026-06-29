@@ -69,7 +69,7 @@ async def sync_contacts(db: Session = Depends(get_db)):
 async def export_contacts(db: Session = Depends(get_db)):
     """Export all contacts as a CSV file download."""
     import csv, io
-    contacts = db.query(Contact).filter(Contact.is_active == True).order_by(Contact.name).all()
+    contacts = db.query(Contact).filter(Contact.is_active == True, Contact.is_valid == True).order_by(Contact.name).all()
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["name", "phone", "email", "notes", "tags"])

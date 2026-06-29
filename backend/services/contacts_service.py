@@ -1,6 +1,7 @@
 """
 Contacts Service — CRUD, search, filtering, validation
 """
+import re
 import logging
 from typing import Optional, List
 from sqlalchemy.orm import Session
@@ -10,6 +11,29 @@ from models.schemas import ContactCreate, ContactUpdate
 
 logger = logging.getLogger(__name__)
 
+# ─── Phone / contact validation ───────────────────────────────
+
+def is_valid_contact_phone(phone: str) -> bool:
+    """Return True for phone numbers that represent real WhatsApp contacts.
+
+    Accepts:
+      - Standard E.164 user numbers: +<7-13 digits>
+        (13-digit cap catches WhatsApp-internal pseudo-IDs like @lid)
+      - Group JIDs: anything ending in @g.us
+
+    Rejects:
+      - @broadcast, @newsletter, @lid and other system JIDs
+      - Numbers that are too short (<7 digits) or too long (>13 digits)
+      - Non-numeric or improperly formatted strings
+    """
+    if not phone:
+        return False
+    if phone.endswith('@g.us'):
+        return True
+    if '@' in phone:       # any other @ = system/device JID
+        return False
+    return bool(re.match(r'^\+\d{7,13}$', phone))
+
 
 def claim_orphan_contacts(db: Session, wa_account: str) -> int:
     """Assign wa_account to any contacts that have no owner (NULL).
@@ -17,9 +41,10 @@ def claim_orphan_contacts(db: Session, wa_account: str) -> int:
     Called once when an account connects so legacy/unowned contacts are
     adopted by the active account rather than becoming invisible.
     """
-    updated = db.query(Contact).filter(Contact.wa_account.is_(None)).update(
-        {"wa_account": wa_account}, synchronize_session=False
-    )
+    updated = db.query(Contact).filter(
+        Contact.wa_account.is_(None),
+        Contact.is_valid == True,
+    ).update({"wa_account": wa_account}, synchronize_session=False)
     if updated:
         db.commit()
         logger.info(f"Claimed {updated} orphan contacts for account {wa_account}")
@@ -42,7 +67,11 @@ def get_contacts(
     if not wa_account:
         return {"contacts": [], "total": 0, "page": page, "limit": limit}
 
-    query = db.query(Contact).filter(Contact.wa_account == wa_account)
+    # is_valid is a system filter — always exclude invalid/system contacts
+    query = db.query(Contact).filter(
+        Contact.wa_account == wa_account,
+        Contact.is_valid == True,
+    )
 
     if search:
         search_term = f"%{search}%"
@@ -131,9 +160,10 @@ def delete_contact(db: Session, contact_id: int) -> bool:
 
 
 def get_total_contacts(db: Session, wa_account: Optional[str] = None) -> int:
-    if not wa_account:
-        return 0
-    return db.query(func.count(Contact.id)).filter(Contact.wa_account == wa_account).scalar() or 0
+    query = db.query(func.count(Contact.id)).filter(Contact.is_valid == True)
+    if wa_account:
+        query = query.filter(Contact.wa_account == wa_account)
+    return query.scalar() or 0
 
 
 def sync_whatsapp_contacts(db: Session) -> dict:
@@ -196,11 +226,10 @@ def sync_whatsapp_contacts(db: Session) -> dict:
 
                 if not phone or not name:
                     continue
-
-                # Exclude broadcast lists from sync
                 if c_type == "Broadcast":
                     continue
 
+                valid = is_valid_contact_phone(phone)
                 type_tag = "Group" if c_type == "Group" else None
 
                 existing = db.query(Contact).filter(Contact.phone == phone).first()
@@ -212,6 +241,9 @@ def sync_whatsapp_contacts(db: Session) -> dict:
                         changed = True
                     if existing.wa_account != current_phone:
                         existing.wa_account = current_phone
+                        changed = True
+                    if existing.is_valid != valid:
+                        existing.is_valid = valid
                         changed = True
 
                     curr_tags = existing.tags or []
@@ -229,13 +261,19 @@ def sync_whatsapp_contacts(db: Session) -> dict:
                         updated_count += 1
                 else:
                     tags = [type_tag] if type_tag else []
-                    contact = Contact(name=name, phone=phone, is_active=True, tags=tags, wa_account=current_phone)
+                    contact = Contact(
+                        name=name, phone=phone,
+                        is_active=True, is_valid=valid,
+                        tags=tags, wa_account=current_phone,
+                    )
                     db.add(contact)
                     new_count += 1
 
             db.commit()
 
+            total_valid = db.query(Contact).filter(Contact.is_valid == True).count()
             total_in_db = db.query(Contact).count()
+            hidden = total_in_db - total_valid
             parts = []
             if new_count > 0:
                 parts.append(f"{new_count} new")
@@ -243,11 +281,12 @@ def sync_whatsapp_contacts(db: Session) -> dict:
                 parts.append(f"{updated_count} updated")
 
             change_str = ", ".join(parts) if parts else "no changes"
+            hidden_note = f", {hidden} hidden (invalid/system)" if hidden > 0 else ""
             return {
                 "success": True,
                 "message": (
                     f"Sync complete: {total_from_bridge} contacts from WhatsApp "
-                    f"({change_str}). Total in database: {total_in_db}."
+                    f"({change_str}). Showing {total_valid} valid contacts{hidden_note}."
                 )
             }
         except Exception as e:

@@ -60,6 +60,15 @@ async def lifespan(app: FastAPI):
          "ALTER TABLE messages MODIFY COLUMN whatsapp_message_id VARCHAR(200) NULL"),
         ("messages whatsapp_id index",
          "ALTER TABLE messages ADD INDEX idx_message_wa_id (whatsapp_message_id)"),
+        ("contacts is_valid column",
+         "ALTER TABLE contacts ADD COLUMN is_valid TINYINT(1) NOT NULL DEFAULT 1"),
+        ("contacts is_valid index",
+         "ALTER TABLE contacts ADD INDEX idx_contact_valid (is_valid)"),
+        ("contacts cleanup invalid phones",
+         "UPDATE contacts SET is_valid = 0 WHERE "
+         "(phone LIKE '%@%' AND phone NOT LIKE '%@g.us') "
+         "OR phone NOT LIKE '+%' "
+         "OR (phone NOT LIKE '%@g.us' AND CHAR_LENGTH(phone) > 14)"),
         ("whatsapp_profiles table",
          "CREATE TABLE IF NOT EXISTS whatsapp_profiles ("
          "  id INT AUTO_INCREMENT PRIMARY KEY,"
