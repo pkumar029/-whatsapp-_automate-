@@ -146,9 +146,11 @@ from routes.automations import router as automations_router
 from routes.logs import router as logs_router
 from routes.dashboard import router as dashboard_router
 from routes.campaigns import router as campaigns_router
+from routes.auth import router as auth_router
 
 API_PREFIX = "/api/v1"
 
+app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(whatsapp_router, prefix=API_PREFIX)
 app.include_router(contacts_router, prefix=API_PREFIX)
 app.include_router(messages_router, prefix=API_PREFIX)

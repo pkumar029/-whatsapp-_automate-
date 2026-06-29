@@ -36,6 +36,14 @@ api.interceptors.response.use(
   }
 )
 
+// ─── Auth API ─────────────────────────────────────────────────
+export const authApi = {
+  requestOtp: (phone) => api.post('/auth/request-otp', { phone }),
+  verifyOtp: (phone, otp) => api.post('/auth/verify-otp', { phone, otp }),
+  me: () => api.get('/auth/me'),
+  logout: () => api.post('/auth/logout'),
+}
+
 // ─── WhatsApp API ─────────────────────────────────────────────
 export const whatsappApi = {
   getStatus: () => api.get('/whatsapp/status'),
