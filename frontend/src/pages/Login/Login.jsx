@@ -180,8 +180,6 @@ export default function Login() {
     refreshSessionStatus().catch(() => {})
   }
 
-  const isConnecting = sessionStatus.status === 'connecting'
-
   return (
     <div style={{
       minHeight: '100vh',
@@ -396,7 +394,7 @@ export default function Login() {
       )}
 
       {/* ── CONNECTING / QR / PAIRING CODE VIEW ── */}
-      {(view === 'connecting' || (isConnecting && view !== 'form')) && (
+      {view === 'connecting' && (
         <div className="portal-card" style={{ alignItems: 'center', gap: 20 }}>
           {message && (
             <div style={{ background: 'var(--accent-primary-muted)', border: '1px solid rgba(37,211,102,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 12px', fontSize: 'var(--font-size-xs)', color: 'var(--accent-primary)', width: '100%' }}>
