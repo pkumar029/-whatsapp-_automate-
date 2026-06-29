@@ -13,7 +13,7 @@ const CONNECTION_METHODS = [
     id: 'bridge',
     icon: <Smartphone size={20} />,
     title: 'WhatsApp Web Bridge',
-    desc: 'Link via QR Code or Pairing Code using your phone'
+    desc: 'Link using an 8-character pairing code on your phone'
   },
   {
     id: 'meta',
