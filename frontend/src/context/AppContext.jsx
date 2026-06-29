@@ -100,9 +100,12 @@ export function AppProvider({ children }) {
         localStorage.setItem('wa_active_phone', newPhone)
       }
 
-      // Auto-sync contacts when WhatsApp first becomes connected (fire-and-forget so navigation isn't blocked)
+      // Every time a session first becomes connected: remount UI + sync contacts
       if (data.status === 'connected' && prevStatusRef.current !== 'connected') {
         prevStatusRef.current = 'connected'
+        // Remount all pages so stale data from the previous session is cleared
+        // and every component refetches fresh. Covers same-account re-login too.
+        setAccountKey(k => k + 1)
         const lastSync = localStorage.getItem('wa_last_sync')
         const now = Date.now()
         if (!lastSync || now - parseInt(lastSync, 10) > 30 * 60 * 1000) {
