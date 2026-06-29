@@ -68,6 +68,10 @@ def get_session_status(db: Session) -> dict:
                     session.qr_code = None
                     session.error_message = None
                     db.commit()
+                    # Adopt any ownerless contacts into this account (one-time migration)
+                    if session.phone:
+                        from services.contacts_service import claim_orphan_contacts
+                        claim_orphan_contacts(db, session.phone)
                 elif bridge_status == "connecting":
                     session.qr_code = bridge_data.get("qr")
                     if bridge_error:

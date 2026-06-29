@@ -11,6 +11,21 @@ from models.schemas import ContactCreate, ContactUpdate
 logger = logging.getLogger(__name__)
 
 
+def claim_orphan_contacts(db: Session, wa_account: str) -> int:
+    """Assign wa_account to any contacts that have no owner (NULL).
+
+    Called once when an account connects so legacy/unowned contacts are
+    adopted by the active account rather than becoming invisible.
+    """
+    updated = db.query(Contact).filter(Contact.wa_account.is_(None)).update(
+        {"wa_account": wa_account}, synchronize_session=False
+    )
+    if updated:
+        db.commit()
+        logger.info(f"Claimed {updated} orphan contacts for account {wa_account}")
+    return updated
+
+
 def get_contacts(
     db: Session,
     page: int = 1,
@@ -21,17 +36,13 @@ def get_contacts(
 ) -> dict:
     """List contacts with pagination and search.
 
-    If wa_account is provided, returns contacts belonging to that account plus
-    contacts with no account set (manually added / legacy records that predate
-    the wa_account field).  Contacts strictly belonging to a DIFFERENT account
-    are excluded so switching accounts shows a clean view.
+    If wa_account is provided, returns only contacts belonging to that account.
+    Contacts from other accounts are hidden (strict per-account isolation).
     """
     query = db.query(Contact)
 
     if wa_account:
-        query = query.filter(
-            or_(Contact.wa_account == wa_account, Contact.wa_account.is_(None))
-        )
+        query = query.filter(Contact.wa_account == wa_account)
 
     if search:
         search_term = f"%{search}%"
@@ -122,7 +133,7 @@ def delete_contact(db: Session, contact_id: int) -> bool:
 def get_total_contacts(db: Session, wa_account: Optional[str] = None) -> int:
     q = db.query(func.count(Contact.id))
     if wa_account:
-        q = q.filter(or_(Contact.wa_account == wa_account, Contact.wa_account.is_(None)))
+        q = q.filter(Contact.wa_account == wa_account)
     return q.scalar() or 0
 
 
