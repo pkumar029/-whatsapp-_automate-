@@ -204,7 +204,7 @@ export default function Login() {
 
       {/* ── SPLASH ── */}
       {view === 'splash' && (
-        <div className="splash-card" onClick={() => setView('method')}>
+        <div className="splash-card">
           <div className="logo-container">
             <div className="logo-pulse-ring" />
             <div className="logo-icon-bg">
@@ -217,7 +217,7 @@ export default function Login() {
             <p className="splash-subtitle">Scale Your Communication Effortlessly</p>
             <p className="splash-description">Connect your account to schedule campaigns, build visual bot responders, and view live chat logs from a single unified workspace.</p>
           </div>
-          <button className="splash-btn">Get Started &amp; Link Device &rarr;</button>
+          <button type="button" className="splash-btn" onClick={() => setView('method')}>Get Started &amp; Link Device &rarr;</button>
         </div>
       )}
 
@@ -460,11 +460,9 @@ export default function Login() {
           box-shadow: 0 4px 16px rgba(0,0,0,0.5);
           z-index: 10;
           display: flex; flex-direction: column; align-items: center; gap: 28px;
-          text-align: center; cursor: pointer;
+          text-align: center;
           animation: fade-in 0.25s ease forwards;
-          transition: border-color 0.2s;
         }
-        .splash-card:hover { border-color: rgba(37,211,102,0.3); }
         .logo-container { position: relative; width: 90px; height: 90px; display: flex; align-items: center; justify-content: center; }
         .logo-pulse-ring { position: absolute; width: 100%; height: 100%; border-radius: 50%; border: 2px solid rgba(37,211,102,0.35); animation: pulse-ring 2.5s ease-in-out infinite; will-change: transform, opacity; }
         .logo-icon-bg { width: 72px; height: 72px; background: linear-gradient(135deg,#10b981 0%,#059669 100%); border-radius: 20px; display: flex; align-items: center; justify-content: center; color: #fff; position: relative; }
