@@ -193,7 +193,7 @@ function StepNode({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
       borderRadius: 'var(--radius-md)',
       width: '100%',
       transition: 'border-color 0.2s',
-      overflow: 'hidden',
+      overflow: open ? 'visible' : 'hidden',
     }}>
       {/* Header — always visible */}
       <div

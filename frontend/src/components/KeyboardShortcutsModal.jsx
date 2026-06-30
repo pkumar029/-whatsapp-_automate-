@@ -1,13 +1,21 @@
-import { useEffect } from 'react'
-import { SHORTCUT_GROUPS } from '../hooks/useKeyboardShortcuts'
+import { useEffect, useState } from 'react'
+import { SHORTCUT_GROUPS, getShortcutsEnabled, setShortcutsEnabled } from '../hooks/useKeyboardShortcuts'
 
 export default function KeyboardShortcutsModal({ open, onClose }) {
+  const [enabled, setEnabled] = useState(getShortcutsEnabled)
+
   useEffect(() => {
     if (!open) return
     const handler = (e) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [open, onClose])
+
+  const toggleEnabled = () => {
+    const next = !enabled
+    setEnabled(next)
+    setShortcutsEnabled(next)
+  }
 
   if (!open) return null
 
@@ -26,15 +34,15 @@ export default function KeyboardShortcutsModal({ open, onClose }) {
           background: 'var(--bg-secondary)',
           border: '1px solid var(--border-primary)',
           borderRadius: 'var(--radius-lg)',
-          width: '100%', maxWidth: 640,
-          maxHeight: '80vh', overflowY: 'auto',
+          width: '100%', maxWidth: 680,
+          maxHeight: '85vh', overflowY: 'auto',
           padding: '28px 32px',
           boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
         }}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24 }}>
           <div>
             <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>
               Keyboard Shortcuts
@@ -43,20 +51,49 @@ export default function KeyboardShortcutsModal({ open, onClose }) {
               Press <Kbd>?</Kbd> anytime to show this panel
             </p>
           </div>
-          <button
-            onClick={onClose}
-            style={{
-              background: 'none', border: '1px solid var(--border-primary)',
-              borderRadius: 'var(--radius-sm)', color: 'var(--text-muted)',
-              cursor: 'pointer', padding: '4px 10px', fontSize: 13,
-            }}
-          >
-            Esc
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {/* Enable / Disable toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-secondary)' }}>
+              <span>{enabled ? 'Enabled' : 'Disabled'}</span>
+              <button
+                onClick={toggleEnabled}
+                style={{
+                  width: 40, height: 22, borderRadius: 11,
+                  background: enabled ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
+                  border: '1px solid var(--border-primary)',
+                  cursor: 'pointer', position: 'relative', transition: 'background 0.2s',
+                }}
+              >
+                <span style={{
+                  position: 'absolute', top: 2,
+                  left: enabled ? 20 : 2,
+                  width: 16, height: 16, borderRadius: '50%',
+                  background: '#fff',
+                  transition: 'left 0.2s',
+                }} />
+              </button>
+            </div>
+            <button
+              onClick={onClose}
+              style={{
+                background: 'none', border: '1px solid var(--border-primary)',
+                borderRadius: 'var(--radius-sm)', color: 'var(--text-muted)',
+                cursor: 'pointer', padding: '4px 10px', fontSize: 13,
+              }}
+            >
+              Esc
+            </button>
+          </div>
         </div>
 
-        {/* Shortcut groups — 2 column grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px 32px' }}>
+        {!enabled && (
+          <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 8, padding: '10px 14px', marginBottom: 20, fontSize: 13, color: '#f59e0b' }}>
+            Keyboard shortcuts are currently disabled. Toggle above to re-enable.
+          </div>
+        )}
+
+        {/* Shortcut groups — 2-column grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px 40px' }}>
           {SHORTCUT_GROUPS.map(group => (
             <div key={group.label}>
               <div style={{
@@ -82,13 +119,13 @@ export default function KeyboardShortcutsModal({ open, onClose }) {
           ))}
         </div>
 
-        {/* Footer tip */}
+        {/* Footer */}
         <div style={{
           marginTop: 24, paddingTop: 16,
           borderTop: '1px solid var(--border-primary)',
           fontSize: 12, color: 'var(--text-muted)', textAlign: 'center',
         }}>
-          Shortcuts are disabled when typing in input fields
+          Navigation shortcuts (Ctrl+Shift+*) work even while typing · All others are blocked in text fields
         </div>
       </div>
     </div>

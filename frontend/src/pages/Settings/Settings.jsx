@@ -7,10 +7,12 @@ import {
   Sun, Moon, Volume2, VolumeX, Timer, Ban, Monitor,
   Info, Globe, Key, Check, X, Eye, EyeOff, Send,
   Keyboard, AlertCircle, CheckCircle2, Zap, Database,
-  Image as ImageIcon, Archive, FileDown, Trash2, ScrollText
+  Image as ImageIcon, Archive, FileDown, Trash2, ScrollText,
+  Sparkles, FlaskConical
 } from 'lucide-react'
-import { whatsappApi, logsApi } from '../../services/api'
+import { whatsappApi, logsApi, aiApi } from '../../services/api'
 import { useApp } from '../../context/AppContext'
+import { SHORTCUT_GROUPS, getShortcutsEnabled, setShortcutsEnabled } from '../../hooks/useKeyboardShortcuts'
 import { formatIST } from '../../utils/date'
 import { getBrowserInfo, getSessionStart } from '../../utils/browser'
 import { getErrorMessage } from '../../utils/error'
@@ -590,58 +592,45 @@ function NotificationsSection() {
 
 // ─── Section: Keyboard Shortcuts ─────────────────────────────────
 function ShortcutsSection() {
-  const groups = [
-    {
-      label: 'Chats',
-      items: [
-        ['Ctrl + N', 'New chat'],
-        ['Ctrl + Shift + ]', 'Next chat'],
-        ['Ctrl + Shift + [', 'Previous chat'],
-        ['Ctrl + F', 'Search in chat'],
-        ['Ctrl + Shift + F', 'Search all chats'],
-      ],
-    },
-    {
-      label: 'Chat actions',
-      items: [
-        ['Ctrl + E', 'Archive chat'],
-        ['Ctrl + Shift + M', 'Mute / Unmute chat'],
-        ['Ctrl + Backspace', 'Delete chat'],
-        ['Ctrl + Shift + U', 'Mark as unread'],
-        ['Ctrl + Shift + E', 'Archive all chats'],
-      ],
-    },
-    {
-      label: 'Messages',
-      items: [
-        ['Ctrl + C', 'Copy selected message'],
-        ['Enter', 'Send message'],
-        ['Shift + Enter', 'New line in message'],
-        ['Esc', 'Close chat / panel'],
-      ],
-    },
-    {
-      label: 'General',
-      items: [
-        ['Ctrl + /', 'View keyboard shortcuts'],
-        ['Ctrl + P', 'Open profile settings'],
-        ['Ctrl + ,', 'Open settings'],
-      ],
-    },
-  ]
+  const [enabled, setEnabledState] = useState(getShortcutsEnabled)
+
+  const toggle = () => {
+    const next = !enabled
+    setEnabledState(next)
+    setShortcutsEnabled(next)
+  }
+
   return (
     <div style={{ padding: '8px 20px 24px' }}>
-      <div style={{ fontSize: 13, color: WA.sub, marginBottom: 20, lineHeight: 1.6 }}>
-        Use these keyboard shortcuts to navigate and interact faster in WhatsApp.
+      {/* Enable / disable row */}
+      <div style={{ background: WA.row, borderRadius: 12, border: `1px solid ${WA.border}`, marginBottom: 20, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px' }}>
+          <div>
+            <div style={{ fontSize: 14, color: WA.text, fontWeight: 500 }}>Enable keyboard shortcuts</div>
+            <div style={{ fontSize: 12, color: WA.sub, marginTop: 2 }}>
+              Navigation shortcuts (Ctrl+Shift+*) always work · others are blocked in text fields
+            </div>
+          </div>
+          <Toggle on={enabled} onChange={toggle} />
+        </div>
       </div>
-      {groups.map(g => (
-        <div key={g.label} style={{ marginBottom: 24 }}>
-          <div style={{ fontSize: 12, color: WA.green, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 10 }}>{g.label}</div>
+
+      <div style={{ fontSize: 13, color: WA.sub, marginBottom: 20, lineHeight: 1.6 }}>
+        Press <kbd style={{ fontFamily: 'monospace', fontSize: 12, background: '#2a3942', padding: '2px 6px', borderRadius: 4, border: `1px solid ${WA.border}` }}>?</kbd> anywhere (outside text fields) to open the shortcuts overlay.
+      </div>
+
+      {SHORTCUT_GROUPS.map(g => (
+        <div key={g.label} style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 12, color: WA.green, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 8 }}>{g.label}</div>
           <div style={{ background: WA.row, borderRadius: 12, border: `1px solid ${WA.border}`, overflow: 'hidden' }}>
-            {g.items.map(([shortcut, action], i) => (
-              <div key={shortcut} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: i < g.items.length - 1 ? `1px solid ${WA.border}` : 'none' }}>
-                <span style={{ fontSize: 14, color: WA.text }}>{action}</span>
-                <kbd style={{ fontFamily: 'monospace', fontSize: 12, color: WA.sub, background: '#2a3942', padding: '3px 8px', borderRadius: 6, border: `1px solid ${WA.border}` }}>{shortcut}</kbd>
+            {g.shortcuts.map((s, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 16px', borderBottom: i < g.shortcuts.length - 1 ? `1px solid ${WA.border}` : 'none' }}>
+                <span style={{ fontSize: 13, color: WA.text }}>{s.description}</span>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {s.keys.map((k, ki) => (
+                    <kbd key={ki} style={{ fontFamily: 'monospace', fontSize: 11, color: WA.sub, background: '#2a3942', padding: '2px 7px', borderRadius: 5, border: `1px solid ${WA.border}`, whiteSpace: 'nowrap' }}>{k}</kbd>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
@@ -845,6 +834,303 @@ function LogControlSection() {
   )
 }
 
+// ─── Section: AI Integration ─────────────────────────────────────
+function AiSection() {
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [toast, setToast] = useState({ msg: '', type: '' })
+  const [testResult, setTestResult] = useState(null)
+  const [showKey, setShowKey] = useState(false)
+
+  // Form state
+  const [enabled, setEnabled] = useState(false)
+  const [provider, setProvider] = useState('openai')
+  const [apiKey, setApiKey] = useState('')
+  const [apiKeyMasked, setApiKeyMasked] = useState('')
+  const [hasApiKey, setHasApiKey] = useState(false)
+  const [model, setModel] = useState('')
+  const [tone, setTone] = useState('professional')
+  const [language, setLanguage] = useState('auto')
+  const [autoSuggest, setAutoSuggest] = useState(false)
+
+  const showToast = (msg, type = 'ok') => {
+    setToast({ msg, type })
+    setTimeout(() => setToast({ msg: '', type: '' }), 3500)
+  }
+
+  useEffect(() => {
+    aiApi.getSettings()
+      .then(r => {
+        const d = r.data
+        setEnabled(d.enabled)
+        setProvider(d.provider)
+        setApiKeyMasked(d.api_key_masked || '')
+        setHasApiKey(d.has_api_key)
+        setModel(d.model || '')
+        setTone(d.tone)
+        setLanguage(d.language)
+        setAutoSuggest(d.auto_suggest)
+      })
+      .catch(() => showToast('Failed to load AI settings', 'error'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true)
+    setTestResult(null)
+    try {
+      const payload = { provider, tone, language, model, enabled, auto_suggest: autoSuggest }
+      if (apiKey.trim()) payload.api_key = apiKey.trim()
+      const r = await aiApi.saveSettings(payload)
+      setHasApiKey(r.data.has_api_key)
+      setApiKeyMasked(r.data.api_key_masked || '')
+      setApiKey('')
+      showToast('AI settings saved')
+    } catch {
+      showToast('Failed to save AI settings', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleTest = async () => {
+    // Save first (if there's a pending API key), then test
+    if (apiKey.trim()) await handleSave()
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const r = await aiApi.testConnection()
+      setTestResult({ ok: true, reply: r.data.reply, provider: r.data.provider })
+    } catch (err) {
+      const msg = err?.response?.data?.detail || 'Connection test failed'
+      setTestResult({ ok: false, reply: msg })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const providerPlaceholders = {
+    openai: 'sk-…',
+    gemini: 'AIza…',
+  }
+  const defaultModels = {
+    openai: 'gpt-4o-mini  (default)',
+    gemini: 'gemini-1.5-flash  (default)',
+  }
+
+  if (loading) return (
+    <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}>
+      <RefreshCw size={20} color={WA.sub} style={{ animation: 'spin 1s linear infinite' }} />
+    </div>
+  )
+
+  return (
+    <div>
+      <Toast msg={toast.msg} type={toast.type} />
+
+      {/* Master toggle */}
+      <SecLabel>AI Smart Reply</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <Row
+          icon={<Sparkles size={17} color="#fff" />}
+          iconBg="#7c3aed"
+          label="Enable AI Auto Reply"
+          sublabel={enabled ? 'AI reply button active in Messages' : 'Disabled — AI button hidden in Messages'}
+          right={<Toggle on={enabled} onChange={() => setEnabled(v => !v)} />}
+          last
+        />
+      </div>
+
+      {/* Provider */}
+      <SecLabel>AI Provider</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <div style={{ display: 'flex', gap: 10, padding: '14px 16px' }}>
+          {[
+            { v: 'openai', label: 'OpenAI', sub: 'GPT-4o, GPT-4o-mini', color: '#10b981' },
+            { v: 'gemini', label: 'Google Gemini', sub: 'Gemini 1.5 Flash / Pro', color: '#4285f4' },
+          ].map(p => (
+            <button
+              key={p.v}
+              onClick={() => { setProvider(p.v); setModel('') }}
+              style={{
+                flex: 1, padding: '12px 10px', borderRadius: 10, cursor: 'pointer',
+                border: `2px solid ${provider === p.v ? p.color : WA.border}`,
+                background: provider === p.v ? `${p.color}15` : WA.bg,
+                color: provider === p.v ? p.color : WA.sub,
+                textAlign: 'center', transition: 'all 0.15s',
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{p.label}</div>
+              <div style={{ fontSize: 11, marginTop: 3, opacity: 0.8 }}>{p.sub}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* API Key */}
+      <SecLabel>API Key</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', border: `1px solid ${WA.border}`, overflow: 'hidden' }}>
+        <div style={{ padding: '14px 16px' }}>
+          <div style={{ fontSize: 13, color: WA.sub, marginBottom: 8 }}>
+            {provider === 'openai'
+              ? 'Get your key at platform.openai.com → API Keys'
+              : 'Get your key at aistudio.google.com → Get API Key'}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ position: 'relative', flex: 1 }}>
+              <input
+                type={showKey ? 'text' : 'password'}
+                value={apiKey}
+                onChange={e => setApiKey(e.target.value)}
+                placeholder={hasApiKey ? apiKeyMasked : (providerPlaceholders[provider] || 'Enter API key')}
+                style={{ width: '100%', boxSizing: 'border-box', padding: '10px 38px 10px 14px', background: WA.input, border: `1px solid ${WA.border}`, borderRadius: 8, color: WA.text, fontSize: 14, outline: 'none', fontFamily: 'monospace' }}
+                onFocus={e => e.target.style.borderColor = WA.green}
+                onBlur={e => e.target.style.borderColor = WA.border}
+              />
+              <button
+                onClick={() => setShowKey(v => !v)}
+                style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: WA.sub, display: 'flex' }}
+              >
+                {showKey ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
+            {hasApiKey && !apiKey && (
+              <span style={{ fontSize: 11, color: WA.green, display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                <Check size={12} /> Key saved
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: WA.sub, marginTop: 8 }}>
+            Leave blank to keep the existing saved key. The raw key is never displayed.
+          </div>
+        </div>
+
+        {/* Test connection */}
+        <div style={{ padding: '10px 16px', borderTop: `1px solid ${WA.border}`, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button
+            onClick={handleTest}
+            disabled={testing || (!hasApiKey && !apiKey.trim())}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
+              borderRadius: 8, border: `1px solid ${WA.border}`,
+              background: 'transparent', color: WA.sub, fontSize: 13,
+              cursor: testing ? 'wait' : 'pointer', opacity: (!hasApiKey && !apiKey.trim()) ? 0.4 : 1,
+            }}
+          >
+            {testing
+              ? <><RefreshCw size={13} style={{ animation: 'spin 1s linear infinite' }} /> Testing…</>
+              : <><FlaskConical size={13} /> Test Connection</>}
+          </button>
+          {testResult && (
+            <div style={{
+              flex: 1, fontSize: 12, padding: '5px 10px', borderRadius: 6,
+              background: testResult.ok ? 'rgba(37,211,102,.1)' : 'rgba(255,77,79,.1)',
+              border: `1px solid ${testResult.ok ? 'rgba(37,211,102,.3)' : 'rgba(255,77,79,.3)'}`,
+              color: testResult.ok ? WA.green : '#ff4d4f',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              {testResult.ok ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />}
+              {testResult.ok ? `✓ Connected (${testResult.provider}) — "${testResult.reply}"` : testResult.reply}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Model override */}
+      <SecLabel>Model (optional)</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', border: `1px solid ${WA.border}`, overflow: 'hidden' }}>
+        <div style={{ padding: '14px 16px' }}>
+          <input
+            value={model}
+            onChange={e => setModel(e.target.value)}
+            placeholder={defaultModels[provider] || 'Leave blank for default'}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '10px 14px', background: WA.input, border: `1px solid ${WA.border}`, borderRadius: 8, color: WA.text, fontSize: 14, outline: 'none', fontFamily: 'monospace' }}
+            onFocus={e => e.target.style.borderColor = WA.green}
+            onBlur={e => e.target.style.borderColor = WA.border}
+          />
+          <div style={{ fontSize: 11, color: WA.sub, marginTop: 6 }}>
+            Override only if you need a specific model version. Leave blank to use the latest recommended default.
+          </div>
+        </div>
+      </div>
+
+      {/* Tone & Language */}
+      <SecLabel>Reply Style</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <Row
+          icon={<MessageSquare size={17} color="#fff" />}
+          iconBg="#f59e0b"
+          label="Tone"
+          sublabel="Personality of AI-generated replies"
+          right={
+            <SelectInput
+              value={tone}
+              onChange={setTone}
+              options={[
+                { v: 'professional', label: 'Professional' },
+                { v: 'friendly', label: 'Friendly' },
+                { v: 'formal', label: 'Formal' },
+                { v: 'casual', label: 'Casual' },
+                { v: 'concise', label: 'Concise' },
+              ]}
+            />
+          }
+        />
+        <Row
+          icon={<Globe size={17} color="#fff" />}
+          iconBg="#06b6d4"
+          label="Language"
+          sublabel="Reply language preference"
+          right={
+            <SelectInput
+              value={language}
+              onChange={setLanguage}
+              options={[
+                { v: 'auto', label: 'Auto-detect' },
+                { v: 'English', label: 'English' },
+                { v: 'Tamil', label: 'Tamil' },
+                { v: 'Hindi', label: 'Hindi' },
+                { v: 'Arabic', label: 'Arabic' },
+                { v: 'Spanish', label: 'Spanish' },
+              ]}
+            />
+          }
+          last
+        />
+      </div>
+
+      {/* Auto-suggest */}
+      <SecLabel>Behaviour</SecLabel>
+      <div style={{ background: WA.row, borderRadius: 12, margin: '4px 20px 12px', overflow: 'hidden', border: `1px solid ${WA.border}` }}>
+        <Row
+          icon={<Zap size={17} color="#fff" />}
+          iconBg="#7c3aed"
+          label="Auto-suggest on new message"
+          sublabel={autoSuggest
+            ? 'AI will pre-fill a reply draft when a new message arrives'
+            : 'Click ✨ in Messages to generate a reply on demand'}
+          right={<Toggle on={autoSuggest} onChange={() => setAutoSuggest(v => !v)} />}
+          last
+        />
+      </div>
+
+      {/* Save */}
+      <div style={{ margin: '0 20px 24px' }}>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          style={{ width: '100%', padding: '12px', borderRadius: 10, border: 'none', background: WA.green, color: '#111b21', fontWeight: 700, fontSize: 15, cursor: saving ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: saving ? 0.7 : 1 }}
+        >
+          {saving
+            ? <><RefreshCw size={15} style={{ animation: 'spin 1s linear infinite' }} /> Saving…</>
+            : <><Check size={15} /> Save AI Settings</>}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Nav item (needs own state for hover) ───────────────────────
 function NavItem({ n, active, isMobile, onClick }) {
   const [h, setH] = useState(false)
@@ -880,6 +1166,7 @@ const NAV = [
   { id: 'privacy',       icon: Lock,          label: 'Privacy',            color: '#6366f1' },
   { id: 'chats',         icon: MessageSquare, label: 'Chats',              color: '#f59e0b' },
   { id: 'notifications', icon: Bell,          label: 'Notifications',      color: '#25D366' },
+  { id: 'ai',            icon: Sparkles,      label: 'AI Integration',     color: '#7c3aed' },
   { id: 'log_control',   icon: ScrollText,    label: 'Log Control',        color: '#06b6d4' },
   { id: 'shortcuts',     icon: Keyboard,      label: 'Keyboard shortcuts', color: '#8b5cf6' },
   { id: 'help',          icon: HelpCircle,    label: 'Help',               color: '#64748b' },
@@ -891,6 +1178,7 @@ const SECTION_COMPONENTS = {
   privacy: PrivacySection,
   chats: ChatsSection,
   notifications: NotificationsSection,
+  ai: AiSection,
   log_control: LogControlSection,
   shortcuts: ShortcutsSection,
   help: HelpSection,

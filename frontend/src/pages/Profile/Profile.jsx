@@ -76,10 +76,10 @@ export default function Profile() {
   const fileRef = useRef(null)
 
   // Avatar
-  const [avatar, setAvatar] = useState(profile.avatar || null)
+  const [avatar, setAvatar] = useState(profile.avatar || waProfile?.profilePicUrl || null)
 
   // Profile fields
-  const [name, setName] = useState(profile.name || '')
+  const [name, setName] = useState(profile.name || waProfile?.name || '')
   const [email, setEmail] = useState(profile.email || '')
   const [company, setCompany] = useState(profile.company || '')
   const [role, setRole] = useState(profile.role || '')
@@ -215,84 +215,73 @@ export default function Profile() {
         </div>
       )}
 
-      {/* ── Avatar + App Name banner ── */}
-      <div style={{
-        background: 'linear-gradient(135deg, #1a2634 0%, #0d1117 100%)',
-        border: '1px solid var(--border-primary)',
-        borderRadius: 16,
-        padding: '32px 28px',
-        marginBottom: 20,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 24,
-        flexWrap: 'wrap',
-      }}>
-        <div style={{ position: 'relative', flexShrink: 0 }}>
-          <div style={{
-            width: 90, height: 90, borderRadius: '50%',
-            background: avatar ? 'transparent' : 'linear-gradient(135deg, #25D366, #128C7E)',
-            border: '3px solid #25D366',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 36, fontWeight: 700, color: '#fff',
-            overflow: 'hidden', cursor: 'pointer',
-          }} onClick={() => fileRef.current?.click()}>
-            {avatar
-              ? <img src={avatar} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              : initial}
-          </div>
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            style={{
-              position: 'absolute', bottom: 2, right: 2,
-              width: 26, height: 26, borderRadius: '50%',
-              background: '#25D366', border: '2px solid #0d1117',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: 'pointer', color: '#fff',
-            }}
-          >
-            <Camera size={13} />
-          </button>
-          <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarChange} />
-        </div>
 
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
-            {name || 'Your Name'}
-          </div>
-          <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>
-            {role || 'Role not set'}{company ? ` · ${company}` : ''}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-              padding: '3px 10px', borderRadius: 20, fontSize: 12,
-              background: sessionStatus?.status === 'connected' ? 'rgba(37,211,102,0.12)' : 'rgba(255,77,79,0.12)',
-              color: sessionStatus?.status === 'connected' ? '#25D366' : '#ff4d4f',
-              border: `1px solid ${sessionStatus?.status === 'connected' ? 'rgba(37,211,102,0.3)' : 'rgba(255,77,79,0.3)'}`,
-            }}>
-              <Phone size={11} />
-              {sessionStatus?.status === 'connected'
-                ? (sessionStatus.phone || 'WhatsApp Connected')
-                : 'WhatsApp Disconnected'}
-            </span>
-          </div>
-        </div>
-      </div>
 
       {/* ── Profile Info Card ── */}
       <div className="card" style={{ padding: 24, marginBottom: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(37,211,102,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <User size={18} color="#25D366" />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(37,211,102,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <User size={18} color="#25D366" />
+            </div>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)' }}>App Profile</div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Your display name and details within this app</div>
+            </div>
           </div>
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)' }}>App Profile</div>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Your display name and details within this app</div>
-          </div>
+          {waProfile?.name && name !== waProfile.name && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => {
+                setName(waProfile.name)
+                if (waProfile.profilePicUrl) setAvatar(waProfile.profilePicUrl)
+              }}
+              style={{ fontSize: 11, padding: '5px 10px', height: 'fit-content' }}
+            >
+              Copy WhatsApp Info
+            </button>
+          )}
         </div>
 
         <form onSubmit={handleSaveProfile} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Compact Avatar Uploader */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 8 }}>
+            <div style={{ position: 'relative', flexShrink: 0 }}>
+              <div style={{
+                width: 64, height: 64, borderRadius: '50%',
+                background: avatar ? 'transparent' : 'linear-gradient(135deg, #25D366, #128C7E)',
+                border: '2px solid #25D366',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 24, fontWeight: 700, color: '#fff',
+                overflow: 'hidden', cursor: 'pointer',
+              }} onClick={() => fileRef.current?.click()}>
+                {avatar
+                  ? <img src={avatar} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  : initial}
+              </div>
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                style={{
+                  position: 'absolute', bottom: -2, right: -2,
+                  width: 22, height: 22, borderRadius: '50%',
+                  background: '#25D366', border: '1.5px solid #0d1117',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', color: '#fff',
+                  padding: 0,
+                }}
+              >
+                <Camera size={11} />
+              </button>
+              <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarChange} />
+            </div>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>Profile Picture</div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>Click avatar to upload image</div>
+            </div>
+          </div>
+
           <div className="profile-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             <FormField label="Full Name" icon={User}>
               <Input value={name} onChange={e => setName(e.target.value)} placeholder="Your full name" />

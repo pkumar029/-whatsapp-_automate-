@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   Send, Plus, Calendar, Clock, Play, Pause, XCircle,
   Search, ArrowLeft, RefreshCw, CheckCircle, AlertTriangle,
-  Eye, Check, ShieldAlert, Sliders, FileText, Sparkles, X, WifiOff
+  Eye, Check, ShieldAlert, Sliders, FileText, Sparkles, X, WifiOff,
+  Users
 } from 'lucide-react'
-import { campaignsApi, contactsApi, whatsappApi } from '../../services/api'
+import { campaignsApi, contactsApi } from '../../services/api'
+import { useApp } from '../../context/AppContext'
 import { Link } from 'react-router-dom'
 import { formatIST, formatISTTime } from '../../utils/date'
 import { getErrorMessage } from '../../utils/error'
@@ -132,24 +134,12 @@ function CampaignDonutChart({ total, sent, failed, queued }) {
 }
 
 export default function Campaigns() {
+  const { sessionStatus } = useApp()
+
   const [campaigns, setCampaigns] = useState([])
   const [totalCampaigns, setTotalCampaigns] = useState(0)
   const [loadingCampaigns, setLoadingCampaigns] = useState(true)
   const [page, setPage] = useState(1)
-
-  // WhatsApp connection states
-  const [sessionStatus, setSessionStatus] = useState({ status: 'disconnected' })
-  const [loadingSession, setLoadingSession] = useState(true)
-
-  useEffect(() => {
-    whatsappApi.getStatus().then(res => {
-      setSessionStatus(res.data)
-      setLoadingSession(false)
-    }).catch(() => {
-      setSessionStatus({ status: 'disconnected' })
-      setLoadingSession(false)
-    })
-  }, [])
 
   // Drawer / Modal states
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -202,26 +192,66 @@ export default function Campaigns() {
     return () => clearInterval(interval)
   }, [fetchCampaigns])
 
-  // Fetch contacts for create campaign form
-  const fetchContacts = async () => {
+  // Fetch ALL contacts for the active WhatsApp account (paginated)
+  const fetchContacts = useCallback(async () => {
     setLoadingContacts(true)
     try {
-      const res = await contactsApi.getAll({ limit: 100 })
-      setContacts(res.data?.contacts || res.data || [])
+      const waAccount = sessionStatus?.phone || localStorage.getItem('wa_active_phone') || undefined
+      const pageSize = 500  // backend max
+
+      const first = await contactsApi.getAll({ limit: pageSize, page: 1, wa_account: waAccount })
+      const total = first.data?.total || 0
+      let all = first.data?.contacts || []
+
+      // Fetch remaining pages in parallel if there are more contacts
+      if (total > pageSize) {
+        const numPages = Math.ceil(total / pageSize)
+        const rest = await Promise.all(
+          Array.from({ length: numPages - 1 }, (_, i) =>
+            contactsApi.getAll({ limit: pageSize, page: i + 2, wa_account: waAccount })
+          )
+        )
+        for (const r of rest) all = all.concat(r.data?.contacts || [])
+      }
+
+      setContacts(all)
     } catch (err) {
       console.error('Failed to load contacts:', err)
     } finally {
       setLoadingContacts(false)
     }
-  }
+  }, [sessionStatus?.phone])
+
+  // Sync contacts from WhatsApp bridge, then refresh the list
+  const handleSyncContacts = useCallback(async () => {
+    setLoadingContacts(true)
+    try {
+      await contactsApi.sync()
+      await fetchContacts()
+      window.dispatchEvent(new CustomEvent('contacts-synced'))
+    } catch (err) {
+      console.error('Failed to sync contacts:', err)
+      setLoadingContacts(false)
+    }
+  }, [fetchContacts])
+
+  // Auto-refresh contact list when contacts are synced elsewhere (e.g., Contacts page)
+  useEffect(() => {
+    if (!showCreateModal) return
+    const handler = () => fetchContacts()
+    window.addEventListener('contacts-synced', handler)
+    return () => window.removeEventListener('contacts-synced', handler)
+  }, [showCreateModal, fetchContacts])
 
   // Open Create Campaign
   const handleOpenCreateModal = () => {
     fetchContacts()
     setName('')
+    setTemplate('')
     setDelaySeconds(5)
     setConcurrency(1)
     setSelectedContactIds([])
+    setSearchContact('')
     const d = new Date()
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
     setScheduleDate(d.toISOString().slice(0, 16))
@@ -370,31 +400,35 @@ export default function Campaigns() {
     return <span style={{ color: current.color, fontWeight: 600, fontSize: '11px' }}>{current.label.toUpperCase()}</span>
   }
 
-  const filteredContacts = contacts.filter(c => 
+  const filteredContacts = contacts.filter(c =>
     c.name.toLowerCase().includes(searchContact.toLowerCase()) ||
     c.phone.includes(searchContact)
   )
 
+  // True when every contact currently visible in the filtered list is selected
+  const allFilteredSelected =
+    filteredContacts.length > 0 &&
+    filteredContacts.every(c => selectedContactIds.includes(c.id))
+
   const handleToggleContact = (id) => {
-    setSelectedContactIds(prev => 
+    setSelectedContactIds(prev =>
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
     )
   }
 
   const handleSelectAllContacts = () => {
-    if (selectedContactIds.length === filteredContacts.length) {
-      setSelectedContactIds([])
+    if (allFilteredSelected) {
+      // Deselect just the filtered contacts, keep other selections intact
+      const filteredSet = new Set(filteredContacts.map(c => c.id))
+      setSelectedContactIds(prev => prev.filter(id => !filteredSet.has(id)))
     } else {
-      setSelectedContactIds(filteredContacts.map(c => c.id))
+      // Add all filtered contacts to selection (merge with existing)
+      const existingSet = new Set(selectedContactIds)
+      setSelectedContactIds(prev => [
+        ...prev,
+        ...filteredContacts.filter(c => !existingSet.has(c.id)).map(c => c.id),
+      ])
     }
-  }
-
-  if (loadingSession) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 'calc(100vh - 120px)', color: 'var(--text-muted)' }}>
-        <RefreshCw className="animate-spin" size={24} style={{ marginRight: 8, animation: 'spin 1s linear infinite' }} /> Loading connection state...
-      </div>
-    )
   }
 
   if (sessionStatus.status !== 'connected') {
@@ -840,34 +874,87 @@ export default function Campaigns() {
 
                 {/* Right Side: Multi-Select Contacts List */}
                 <div style={{ width: 320, display: 'flex', flexDirection: 'column', borderLeft: '1px solid var(--border-primary)', paddingLeft: 20 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <label className="form-label" style={{ margin: 0 }}>Recipients * ({selectedContactIds.length} selected)</label>
-                    <button type="button" className="btn btn-ghost btn-sm" style={{ padding: 0, height: 'auto', fontSize: 'var(--font-size-xs)' }} onClick={handleSelectAllContacts}>
-                      {selectedContactIds.length === filteredContacts.length ? 'Deselect All' : 'Select All'}
-                    </button>
+
+                  {/* Panel header */}
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <label className="form-label" style={{ margin: 0 }}>
+                          Recipients *
+                        </label>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Users size={11} />
+                          {loadingContacts
+                            ? 'Loading…'
+                            : `${selectedContactIds.length} selected of ${contacts.length} contacts`}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        {/* Sync contacts from WhatsApp */}
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm btn-icon"
+                          onClick={handleSyncContacts}
+                          disabled={loadingContacts}
+                          title="Sync contacts from WhatsApp"
+                          style={{ padding: 4 }}
+                        >
+                          <RefreshCw size={13} style={{ animation: loadingContacts ? 'spin 1s linear infinite' : 'none' }} />
+                        </button>
+                        {/* Select / Deselect all filtered */}
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ fontSize: 'var(--font-size-xs)', padding: '2px 8px' }}
+                          onClick={handleSelectAllContacts}
+                          disabled={filteredContacts.length === 0}
+                        >
+                          {allFilteredSelected ? '✗ Deselect' : '✓ Select All'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  
+
                   {/* Search Recipients */}
-                  <div className="search-bar" style={{ width: '100%', marginBottom: 10 }}>
+                  <div className="search-bar" style={{ width: '100%', marginBottom: 8 }}>
                     <Search size={12} className="search-bar-icon" />
                     <input
                       className="form-input"
-                      placeholder="Search contacts..."
+                      placeholder="Search by name or phone…"
                       value={searchContact}
                       onChange={e => setSearchContact(e.target.value)}
                       style={{ paddingLeft: 30, height: 32, fontSize: 'var(--font-size-xs)' }}
                     />
                   </div>
 
+                  {/* Search result count when filter is active */}
+                  {searchContact && !loadingContacts && (
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
+                      {filteredContacts.length} result{filteredContacts.length !== 1 ? 's' : ''} for "{searchContact}"
+                    </div>
+                  )}
+
                   {/* Recipients Scroller */}
-                  <div style={{ flex: 1, minHeight: 250, maxHeight: 300, overflowY: 'auto', border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-secondary)' }}>
+                  <div style={{ flex: 1, minHeight: 250, maxHeight: 320, overflowY: 'auto', border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-secondary)' }}>
                     {loadingContacts ? (
-                      <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)' }}>
-                        Loading contacts...
+                      <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                        <RefreshCw size={20} style={{ animation: 'spin 1s linear infinite', color: 'var(--accent-primary)' }} />
+                        Fetching contacts…
+                      </div>
+                    ) : contacts.length === 0 ? (
+                      <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                        <Users size={28} style={{ opacity: 0.35 }} />
+                        <div>
+                          <div style={{ fontWeight: 600, marginBottom: 4 }}>No contacts found</div>
+                          <div>Sync your contacts from WhatsApp first.</div>
+                        </div>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={handleSyncContacts}>
+                          <RefreshCw size={12} /> Sync Now
+                        </button>
                       </div>
                     ) : filteredContacts.length === 0 ? (
-                      <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)' }}>
-                        No contacts found.
+                      <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)' }}>
+                        No contacts match "{searchContact}"
                       </div>
                     ) : (
                       filteredContacts.map(c => {
@@ -875,27 +962,29 @@ export default function Campaigns() {
                         const isGroup = c.tags?.includes('Group')
                         const isTeam = c.tags?.includes('Team')
                         return (
-                          <div 
-                            key={c.id} 
+                          <div
+                            key={c.id}
                             onClick={() => handleToggleContact(c.id)}
-                            style={{ 
-                              display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', 
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px',
                               borderBottom: '1px solid var(--border-primary)', cursor: 'pointer',
-                              background: isChecked ? 'rgba(37, 211, 102, 0.05)' : 'transparent',
-                              transition: 'background 0.2s'
+                              background: isChecked ? 'rgba(37, 211, 102, 0.06)' : 'transparent',
+                              transition: 'background 0.15s',
                             }}
+                            onMouseEnter={e => { if (!isChecked) e.currentTarget.style.background = 'var(--bg-hover)' }}
+                            onMouseLeave={e => { e.currentTarget.style.background = isChecked ? 'rgba(37, 211, 102, 0.06)' : 'transparent' }}
                           >
-                            <input 
-                              type="checkbox" 
+                            <input
+                              type="checkbox"
                               checked={isChecked}
                               readOnly
-                              style={{ cursor: 'pointer' }}
+                              style={{ cursor: 'pointer', accentColor: 'var(--accent-primary)', flexShrink: 0 }}
                             />
                             <div style={{ minWidth: 0, flex: 1 }}>
-                              <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--text-primary)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--text-primary)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5 }}>
                                 {c.name}
-                                {isGroup && <span style={{ fontSize: '8px', background: 'rgba(99, 102, 241, 0.15)', color: 'rgb(165, 180, 252)', padding: '1px 4px', borderRadius: 3, fontWeight: 700, letterSpacing: '0.5px' }}>GROUP</span>}
-                                {isTeam && <span style={{ fontSize: '8px', background: 'rgba(45, 212, 191, 0.15)', color: 'rgb(153, 246, 228)', padding: '1px 4px', borderRadius: 3, fontWeight: 700, letterSpacing: '0.5px' }}>TEAM</span>}
+                                {isGroup && <span style={{ fontSize: '8px', background: 'rgba(99, 102, 241, 0.15)', color: 'rgb(165, 180, 252)', padding: '1px 4px', borderRadius: 3, fontWeight: 700, flexShrink: 0 }}>GROUP</span>}
+                                {isTeam && <span style={{ fontSize: '8px', background: 'rgba(45, 212, 191, 0.15)', color: 'rgb(153, 246, 228)', padding: '1px 4px', borderRadius: 3, fontWeight: 700, flexShrink: 0 }}>TEAM</span>}
                               </div>
                               <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{c.phone}</div>
                             </div>
@@ -909,10 +998,24 @@ export default function Campaigns() {
               </div>
 
               {/* Modal Footer */}
-              <div className="modal-footer" style={{ padding: '12px 20px', borderTop: '1px solid var(--border-primary)', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <div className="modal-footer" style={{ padding: '12px 20px', borderTop: '1px solid var(--border-primary)', display: 'flex', alignItems: 'center', gap: 10 }}>
+                {/* Recipient count summary */}
+                <div style={{ flex: 1, fontSize: 12 }}>
+                  {selectedContactIds.length > 0 ? (
+                    <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>
+                      ✓ {selectedContactIds.length} recipient{selectedContactIds.length !== 1 ? 's' : ''} selected
+                    </span>
+                  ) : (
+                    <span style={{ color: 'var(--text-muted)' }}>Select at least one recipient to continue</span>
+                  )}
+                </div>
                 <button type="button" className="btn btn-secondary" onClick={() => setShowCreateModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={!name || selectedContactIds.length === 0}>
-                  <Send size={14} /> Schedule & Start Campaign
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={!name || !template.trim() || selectedContactIds.length === 0}
+                >
+                  <Send size={14} /> Schedule Campaign ({selectedContactIds.length})
                 </button>
               </div>
             </form>

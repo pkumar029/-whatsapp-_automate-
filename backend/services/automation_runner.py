@@ -19,6 +19,28 @@ logger = logging.getLogger(__name__)
 class StepExecutionError(Exception):
     """Raised when a step execution fails."""
     pass
+def _render_template(template_str: str, contact: Optional[Contact], context: Dict[str, Any]) -> str:
+    if not template_str:
+        return ""
+    rendered = template_str
+    if contact:
+        rendered = rendered.replace("{{name}}", contact.name or "")
+        rendered = rendered.replace("{{phone}}", contact.phone or "")
+        rendered = rendered.replace("{{email}}", contact.email or "")
+        rendered = rendered.replace("{{notes}}", contact.notes or "")
+    
+    # Incoming message details
+    incoming_msg = context.get("content") or context.get("incoming_message") or ""
+    rendered = rendered.replace("{{incoming_message}}", incoming_msg)
+    rendered = rendered.replace("{{message}}", incoming_msg)
+    
+    # Support triggering variables dynamically
+    for k, v in context.items():
+        if isinstance(v, (str, int, float, bool)):
+            rendered = rendered.replace(f"{{{{{k}}}}}", str(v))
+            
+    return rendered
+
 
 
 def execute_step(db: Session, step: AutomationStep, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -65,8 +87,7 @@ def execute_step(db: Session, step: AutomationStep, context: Dict[str, Any]) -> 
                     time.sleep(stagger_seconds)
 
                 # Render template variables
-                body = message_template.replace("{{name}}", contact.name or "")
-                body = body.replace("{{phone}}", contact.phone or "")
+                body = _render_template(message_template, contact, context)
 
                 phone = contact.phone
                 msg = Message(
@@ -115,9 +136,7 @@ def execute_step(db: Session, step: AutomationStep, context: Dict[str, Any]) -> 
                     context["contact"] = contact
                     context["contact_id"] = contact.id
 
-            if contact:
-                message_template = message_template.replace("{{name}}", contact.name or "")
-                message_template = message_template.replace("{{phone}}", contact.phone or "")
+            message_template = _render_template(message_template, contact, context)
 
             if phone:
                 # Save message record

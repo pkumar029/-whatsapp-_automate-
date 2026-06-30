@@ -29,7 +29,7 @@ export function AppProvider({ children }) {
     if (saved) {
       try {
         const parsed = JSON.parse(saved)
-        if (parsed && parsed.name && parsed.name !== 'Admin User') {
+        if (parsed && parsed.name) {
           return parsed
         }
       } catch (e) {
@@ -64,7 +64,6 @@ export function AppProvider({ children }) {
         } else if (oldPassword === newPassword) {
           reject(new Error('New password cannot be the same as old password.'))
         } else {
-          // Success case
           resolve({ success: true, message: 'Password updated successfully!' })
         }
       }, 800)
@@ -96,10 +95,7 @@ export function AppProvider({ children }) {
       const newPhone = data.phone || null
 
       // Detect account switch — different phone connected
-      // NOTE: prevPhoneRef is NOT cleared on disconnect so that connecting a
-      // different account AFTER a disconnect is still caught.
       if (newPhone && prevPhoneRef.current && newPhone !== prevPhoneRef.current) {
-        // Clear all account-scoped caches so new account starts clean
         const clearKeys = ['wa_last_sync', 'wa_session_start', 'wa_favourites', 'wa_pinned', 'wa_archived', 'wa_last_phone', 'wa_whatsapp_profile']
         clearKeys.forEach(k => localStorage.removeItem(k))
         setAccountKey(k => k + 1)
@@ -134,22 +130,19 @@ export function AppProvider({ children }) {
         const now = Date.now()
         if (!lastSync || now - parseInt(lastSync, 10) > 30 * 60 * 1000) {
           localStorage.setItem('wa_last_sync', String(now))
-          // Sync contacts first, then messages — both run in background
           contactsApi.sync()
             .then(() => messagesApi.sync().catch(() => {}))
-            .then(() => setSyncedAt(Date.now()))   // signal pages to refetch
-            .catch(() => setSyncedAt(Date.now()))  // still signal even if sync failed
+            .then(() => setSyncedAt(Date.now()))
+            .catch(() => setSyncedAt(Date.now()))
         }
       } else if (data.status !== 'connected') {
-        // Just logged out / disconnected — clear all cached account data
         if (prevStatusRef.current === 'connected') {
-          setAccountKey(k => k + 1)           // remount UI → clears stale state
-          prevPhoneRef.current = null          // forget old phone
+          setAccountKey(k => k + 1)
+          prevPhoneRef.current = null
           localStorage.removeItem('wa_active_phone')
           localStorage.removeItem('wa_last_sync')
         }
         prevStatusRef.current = data.status
-        // Clear cached WA profile when disconnected
         setWaProfile(null)
         localStorage.removeItem('wa_whatsapp_profile')
       }

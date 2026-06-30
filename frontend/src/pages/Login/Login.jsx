@@ -50,14 +50,14 @@ export default function Login() {
   const [errorMsg, setErrorMsg] = useState('')
   const [backendOk, setBackendOk] = useState(null) // null=checking, true, false
 
-  // On mount: always reset to clean splash state — no stale QR / old view from previous session
+  // On mount: always reset to clean splash state
   useEffect(() => {
     setView('splash')
     setQrCode(null)
     setPairingCode(null)
     setMessage('')
     setErrorMsg('')
-    setPhone('')  // don't pre-fill old phone number when switching accounts
+    setPhone('')
   }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Redirect to dashboard as soon as WhatsApp is connected

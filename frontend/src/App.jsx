@@ -21,6 +21,7 @@ function KeyedLayout() {
 function ProtectedRoute() {
   const { sessionStatus, loadingSession } = useApp()
 
+  // Waiting for WhatsApp session check
   if (loadingSession) {
     return (
       <div style={{

@@ -27,9 +27,9 @@ class Settings(BaseSettings):
     DB_PASSWORD: str = ""
     DB_POOL_SIZE: int = 10
 
-    # JWT
+    # JWT — set JWT_SECRET in .env for production
     JWT_SECRET: str = "dev_secret_key"
-    JWT_EXPIRE_MINUTES: int = 60
+    JWT_EXPIRE_MINUTES: int = 1440  # 24 hours default
 
     # WhatsApp
     WHATSAPP_PHONE_ID: Optional[str] = None

@@ -17,13 +17,13 @@ def is_valid_contact_phone(phone: str) -> bool:
     """Return True for phone numbers that represent real WhatsApp contacts.
 
     Accepts:
-      - Standard E.164 user numbers: +<7-13 digits>
-        (13-digit cap catches WhatsApp-internal pseudo-IDs like @lid)
+      - Standard E.164 user numbers: +<7-15 digits>
+        (15-digit cap catches WhatsApp-internal pseudo-IDs like @lid)
       - Group JIDs: anything ending in @g.us
 
     Rejects:
       - @broadcast, @newsletter, @lid and other system JIDs
-      - Numbers that are too short (<7 digits) or too long (>13 digits)
+      - Numbers that are too short (<7 digits) or too long (>15 digits)
       - Non-numeric or improperly formatted strings
     """
     if not phone:
@@ -32,7 +32,7 @@ def is_valid_contact_phone(phone: str) -> bool:
         return True
     if '@' in phone:       # any other @ = system/device JID
         return False
-    return bool(re.match(r'^\+\d{7,13}$', phone))
+    return bool(re.match(r'^\+\d{7,15}$', phone))
 
 
 def claim_orphan_contacts(db: Session, wa_account: str) -> int:
@@ -106,10 +106,6 @@ def get_contact_by_phone(db: Session, phone: str) -> Optional[Contact]:
 
 
 def create_contact(db: Session, data: ContactCreate, wa_account: Optional[str] = None) -> Contact:
-    existing = get_contact_by_phone(db, data.phone)
-    if existing:
-        raise ValueError(f"Contact with phone {data.phone} already exists")
-
     # Use wa_account from data if provided, otherwise from parameter, otherwise from active session
     resolved_wa_account = data.wa_account or wa_account
     if not resolved_wa_account:
@@ -118,6 +114,26 @@ def create_contact(db: Session, data: ContactCreate, wa_account: Optional[str] =
             WhatsappSession.status == SessionStatus.connected
         ).first()
         resolved_wa_account = session.phone if session else None
+
+    existing = get_contact_by_phone(db, data.phone)
+    if existing:
+        # Adopt / backfill properties rather than throwing 409 Conflict
+        existing.is_valid = True
+        existing.is_active = True
+        if resolved_wa_account:
+            existing.wa_account = resolved_wa_account
+        if data.name:
+            existing.name = data.name
+        if data.email:
+            existing.email = data.email
+        if data.notes:
+            existing.notes = data.notes
+        if data.tags:
+            existing.tags = data.tags
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+        return existing
 
     contact = Contact(
         name=data.name,

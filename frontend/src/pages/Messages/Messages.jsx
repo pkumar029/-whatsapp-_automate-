@@ -7,14 +7,15 @@ import {
   Reply, Star, Forward, Trash2, Copy, MoreVertical, StarOff,
   Info, Lock, Bell, BellOff, Flag, ChevronRight, Shield,
   Timer, EyeOff, Link2, Download, Pin, Archive,
-  Plus, Pencil, UserPlus, UserMinus, Crown, LogOut, Hash
+  Plus, Pencil, UserPlus, UserMinus, Crown, LogOut, Hash, Sparkles
 } from 'lucide-react'
-import { messagesApi, contactsApi, whatsappApi, groupsApi, BASE_URL } from '../../services/api'
+import { messagesApi, contactsApi, whatsappApi, groupsApi, aiApi, BASE_URL } from '../../services/api'
 import { useApp } from '../../context/AppContext'
 import { Link } from 'react-router-dom'
 import { formatISTTime } from '../../utils/date'
 import { getErrorMessage } from '../../utils/error'
 import { useNotifications } from '../../hooks/useNotifications'
+import { useGrammarCheck } from '../../hooks/useGrammarCheck'
 
 // ─── Hook: detect mobile ────────────────────────────────────────
 function useIsMobile(bp = 768) {
@@ -837,6 +838,134 @@ function CreateGroupModal({ contacts, onClose, onCreate }) {
   )
 }
 
+// ─── Grammar Bar ────────────────────────────────────────────────
+function GrammarBar({ text, onApplyCorrection }) {
+  const { checking, result, language, setLanguage, check, reset } = useGrammarCheck()
+  const [showReview, setShowReview] = useState(false)
+  const [autoCorrect, setAutoCorrect] = useState(false)
+
+  useEffect(() => {
+    check(text)
+    setShowReview(false)
+  }, [text, check])
+
+  // Auto-correct: silently fix the text once the check result arrives
+  useEffect(() => {
+    if (!autoCorrect || checking || !result) return
+    const { corrected } = result
+    if (corrected && corrected !== text) onApplyCorrection(corrected)
+  }, [autoCorrect, checking, result]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Clean up on unmount
+  useEffect(() => reset, [reset])
+
+  const issues = result?.issues ?? 0
+  const corrected = result?.corrected || ''
+  const hasCorrection = !!(corrected && corrected !== text)
+
+  return (
+    <div style={{ padding: '2px 12px 0', background: '#202c33', borderTop: '1px solid #1a2730' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0' }}>
+
+        {/* Status indicator */}
+        <div style={{ flex: 1, fontSize: 12 }}>
+          {checking ? (
+            <span style={{ color: '#8696a0' }}>Checking…</span>
+          ) : issues > 0 ? (
+            <span style={{ color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <AlertCircle size={12} /> {issues} {issues === 1 ? 'issue' : 'issues'} found
+            </span>
+          ) : result ? (
+            <span style={{ color: '#25D366', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Check size={12} /> Looks good
+            </span>
+          ) : (
+            <span style={{ color: '#56717a', fontSize: 11 }}>Spell & grammar check</span>
+          )}
+        </div>
+
+        {/* Language selector */}
+        <select
+          value={language}
+          onChange={e => { setLanguage(e.target.value); reset() }}
+          style={{ background: '#1a2730', border: '1px solid #2a3942', color: '#8696a0', fontSize: 11, borderRadius: 6, padding: '2px 6px', cursor: 'pointer', outline: 'none' }}
+        >
+          <option value="en-US">English</option>
+          <option value="en-GB">English (UK)</option>
+          <option value="ta">Tamil</option>
+          <option value="auto">Auto-detect</option>
+        </select>
+
+        {/* Auto-correct toggle */}
+        <button
+          onClick={() => setAutoCorrect(v => !v)}
+          title={autoCorrect ? 'Auto-correct is ON — mistakes are fixed immediately' : 'Auto-correct is OFF — click Fix to review'}
+          style={{
+            background: autoCorrect ? 'rgba(37,211,102,0.12)' : 'transparent',
+            border: `1px solid ${autoCorrect ? 'rgba(37,211,102,0.4)' : '#2a3942'}`,
+            borderRadius: 6, padding: '2px 8px', fontSize: 11,
+            color: autoCorrect ? '#25D366' : '#8696a0',
+            cursor: 'pointer', transition: 'all 0.15s',
+          }}
+        >
+          Auto {autoCorrect ? 'ON' : 'OFF'}
+        </button>
+
+        {/* Fix All button */}
+        {issues > 0 && !autoCorrect && hasCorrection && (
+          <button
+            onClick={() => setShowReview(v => !v)}
+            style={{
+              background: showReview ? '#128C7E' : '#25D366',
+              border: 'none', borderRadius: 6,
+              padding: '3px 10px', fontSize: 12, color: '#fff',
+              cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4,
+              transition: 'background 0.15s',
+            }}
+          >
+            ✨ Fix All
+          </button>
+        )}
+      </div>
+
+      {/* Correction review panel */}
+      {showReview && hasCorrection && (
+        <div style={{
+          margin: '0 0 6px',
+          background: '#1a2730', borderRadius: 8, padding: '10px 12px',
+          border: '1px solid #2a3942',
+        }}>
+          <div style={{ fontSize: 11, color: '#8696a0', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Suggested correction
+          </div>
+          <div style={{
+            fontSize: 13, color: '#e9edef', lineHeight: 1.55,
+            marginBottom: 10, wordBreak: 'break-word', whiteSpace: 'pre-wrap',
+            background: 'rgba(37,211,102,0.05)', borderRadius: 6,
+            padding: '8px 10px', border: '1px solid rgba(37,211,102,0.12)',
+          }}>
+            {corrected}
+          </div>
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+            <button
+              onClick={() => setShowReview(false)}
+              style={{ background: 'transparent', border: '1px solid #2a3942', borderRadius: 6, padding: '4px 12px', color: '#8696a0', fontSize: 12, cursor: 'pointer' }}
+            >
+              Dismiss
+            </button>
+            <button
+              onClick={() => { onApplyCorrection(corrected); setShowReview(false) }}
+              style={{ background: '#25D366', border: 'none', borderRadius: 6, padding: '4px 14px', color: '#fff', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
+            >
+              Apply Correction
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Main Component ──────────────────────────────────────────────
 export default function Messages() {
   const [contacts, setContacts] = useState([])
@@ -899,7 +1028,18 @@ export default function Messages() {
   const [attachUrl, setAttachUrl] = useState('')
 
   const chatEndRef = useRef(null)
+  const textareaRef = useRef(null)
   const fileInputRef = useRef(null)
+
+  // AI reply state
+  const [aiEnabled, setAiEnabled] = useState(false)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [isAiDraft, setIsAiDraft] = useState(false)
+
+  // Check if AI is enabled on mount
+  useEffect(() => {
+    aiApi.getSettings().then(r => setAiEnabled(r.data?.enabled === true)).catch(() => {})
+  }, [])
   const imageInputRef = useRef(null)
   const audioInputRef = useRef(null)
   const seenMsgIdsRef = useRef(new Set())
@@ -1161,6 +1301,42 @@ export default function Messages() {
       if (selectedContact) localStorage.setItem(`wa_reactions_${selectedContact.id}`, JSON.stringify(next))
       return next
     })
+  }
+
+  // ─── AI Reply ──────────────────────────────────────────────────
+  const handleAiSuggest = async () => {
+    if (!selectedContact || aiLoading) return
+    setAiLoading(true)
+    setIsAiDraft(false)
+    try {
+      // Build conversation history from the last 12 messages
+      const history = messages.slice(-12).map(m => ({
+        role: m.direction === 'inbound' ? 'user' : 'assistant',
+        content: m.content,
+      }))
+      if (!history.length) {
+        // Seed with contact name as context if no messages yet
+        history.push({ role: 'user', content: `Hello, I am ${selectedContact.name}` })
+      }
+      const res = await aiApi.generateReply({ messages: history })
+      if (res.data?.reply) {
+        setNewMessage(res.data.reply)
+        setIsAiDraft(true)
+        requestAnimationFrame(() => {
+          if (textareaRef.current) {
+            textareaRef.current.style.height = 'auto'
+            textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + 'px'
+            textareaRef.current.focus()
+          }
+        })
+      }
+    } catch (err) {
+      const detail = err?.response?.data?.detail || 'AI reply failed. Check Settings → AI Integration.'
+      setNewMessage(detail.startsWith('No API key') ? '' : newMessage)
+      console.error('AI suggest error:', detail)
+    } finally {
+      setAiLoading(false)
+    }
   }
 
   const handleStar = (msgId) => {
@@ -1738,8 +1914,26 @@ export default function Messages() {
                 </div>
               )}
 
+              {/* Grammar bar — only shown while composing */}
+              {newMessage.length >= 5 && (
+                <GrammarBar
+                  text={newMessage}
+                  onApplyCorrection={(corrected) => {
+                    setNewMessage(corrected)
+                    // Re-sync textarea height after programmatic text change
+                    requestAnimationFrame(() => {
+                      if (textareaRef.current) {
+                        textareaRef.current.style.height = 'auto'
+                        textareaRef.current.style.height =
+                          Math.min(textareaRef.current.scrollHeight, 120) + 'px'
+                      }
+                    })
+                  }}
+                />
+              )}
+
               {/* Input Bar */}
-              <div style={{ padding: '8px 12px', background: '#202c33', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ padding: '8px 12px', background: '#202c33', display: 'flex', alignItems: 'flex-end', gap: 8 }}>
                 {/* Attach */}
                 <div style={{ position: 'relative' }}>
                   <button onClick={(e) => { e.stopPropagation(); setShowAttachMenu(v => !v) }} title="Attach"
@@ -1771,23 +1965,70 @@ export default function Messages() {
                   )}
                 </div>
 
-                {/* Text input */}
-                <div style={{ flex: 1, background: '#2a3942', borderRadius: 24, padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8696a0', padding: 0, display: 'flex', alignItems: 'center' }} title="Emoji">
+                {/* Text input — textarea for multi-line + native spellcheck */}
+                <div style={{ flex: 1, background: '#2a3942', borderRadius: 24, padding: '8px 16px', display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+                  <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8696a0', padding: '0 0 2px', display: 'flex', alignItems: 'center', flexShrink: 0 }} title="Emoji">
                     <Smile size={20} />
                   </button>
-                  <input
-                    placeholder="Type a message"
+
+                  {/* ✨ AI Suggest button — only shown when AI is enabled */}
+                  {aiEnabled && (
+                    <button
+                      onClick={handleAiSuggest}
+                      disabled={aiLoading || !selectedContact}
+                      title={isAiDraft ? 'AI draft ready — edit or send' : 'Generate AI reply'}
+                      style={{
+                        background: 'none', border: 'none', cursor: aiLoading ? 'wait' : 'pointer',
+                        color: isAiDraft ? '#25D366' : aiLoading ? '#8696a0' : '#8696a0',
+                        padding: '0 0 2px', display: 'flex', alignItems: 'center', flexShrink: 0,
+                        transition: 'color 0.2s',
+                      }}
+                    >
+                      {aiLoading
+                        ? <RefreshCw size={18} style={{ animation: 'spin 1s linear infinite' }} />
+                        : <Sparkles size={18} style={{ color: isAiDraft ? '#25D366' : 'inherit' }} />}
+                    </button>
+                  )}
+
+                  <textarea
+                    ref={textareaRef}
+                    spellCheck={true}
+                    placeholder={aiEnabled ? 'Type a message or tap ✨ for AI reply…' : 'Type a message'}
                     value={newMessage}
-                    onChange={e => setNewMessage(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && newMessage.trim()) { e.preventDefault(); handleSend(newMessage) } }}
-                    style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: '#e9edef', fontSize: 14 }}
+                    rows={1}
+                    onChange={e => {
+                      setNewMessage(e.target.value)
+                      setIsAiDraft(false)
+                      // Auto-resize up to 120 px (≈ 5 lines)
+                      const ta = e.target
+                      ta.style.height = 'auto'
+                      ta.style.height = Math.min(ta.scrollHeight, 120) + 'px'
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey && newMessage.trim()) {
+                        e.preventDefault()
+                        handleSend(newMessage)
+                        setIsAiDraft(false)
+                        if (textareaRef.current) textareaRef.current.style.height = 'auto'
+                      }
+                    }}
+                    style={{
+                      flex: 1, background: 'none', border: 'none', outline: 'none',
+                      color: '#e9edef', fontSize: 14, resize: 'none', overflow: 'hidden',
+                      lineHeight: 1.45, maxHeight: 120, padding: 0, fontFamily: 'inherit',
+                    }}
                   />
                 </div>
 
                 {/* Send/Mic */}
-                <button onClick={newMessage.trim() ? () => handleSend(newMessage) : undefined}
-                  style={{ width: 42, height: 42, borderRadius: '50%', background: '#00a884', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <button
+                  onClick={newMessage.trim() ? () => {
+                    handleSend(newMessage)
+                    setIsAiDraft(false)
+                    if (textareaRef.current) textareaRef.current.style.height = 'auto'
+                  } : undefined}
+                  style={{ width: 42, height: 42, borderRadius: '50%', background: '#00a884', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                >
                   {newMessage.trim() ? <Send size={18} color="#fff" /> : <Mic size={18} color="#fff" />}
                 </button>
               </div>

@@ -314,6 +314,32 @@ app.post('/clear-session', (req, res) => {
     res.json({ success: true, message: 'Session cleared — next connect will require QR or pairing code' });
 });
 
+// Resolve a phone number or stored JID to a sendable WhatsApp JID.
+// Handles @c.us stored in DB, raw numbers, @g.us groups, and @lid multi-device contacts.
+async function resolveJid(phone) {
+    // Groups / broadcast / status — pass through unchanged
+    if (phone.includes('@g.us') || phone.includes('@broadcast') || phone.includes('@newsletter')) {
+        return phone;
+    }
+
+    // Strip any @c.us or @lid suffix stored in the DB so we get just the number
+    let raw = phone.replace(/@\S+$/, '').replace(/[+\s\-()]/g, '');
+    
+    // Automatically prepend Indian country code '91' for 10-digit numbers
+    if (raw.length === 10) {
+        raw = '91' + raw;
+    }
+
+    try {
+        const numberId = await client.getNumberId(raw);
+        if (numberId && numberId._serialized && !numberId._serialized.includes('@lid')) {
+            return numberId._serialized;
+        }
+    } catch (_) { /* fall through to @c.us default */ }
+
+    return `${raw}@c.us`;
+}
+
 app.post('/send', async (req, res) => {
     const { phone, message } = req.body;
     if (!phone || !message) {
@@ -325,36 +351,32 @@ app.post('/send', async (req, res) => {
     }
 
     try {
-        // Clean phone number (JIDs like @g.us / @broadcast should not be modified)
-        let cleanPhone = phone;
-        if (phone.includes('@')) {
-            cleanPhone = phone;
-        } else {
-            const formatted = phone.replace(/[+\s-()]/g, '');
-            try {
-                const numberId = await client.getNumberId(formatted);
-                if (numberId && !numberId._serialized.includes('@lid')) {
-                    cleanPhone = numberId._serialized;
-                    console.log(`Resolved number ${formatted} to JID: ${cleanPhone}`);
+        const jid = await resolveJid(phone);
+        console.log(`Sending to ${jid}: "${message.substring(0, 40)}..."`);
+
+        let msg;
+        try {
+            msg = await client.sendMessage(jid, message);
+        } catch (sendErr) {
+            // "No LID for user" means WhatsApp needs the @lid JID, not @c.us.
+            // Re-resolve without filtering and retry once.
+            if (sendErr.message && sendErr.message.includes('No LID')) {
+                const raw = jid.replace(/@\S+$/, '');
+                const numberId = await client.getNumberId(raw);
+                if (numberId && numberId._serialized && numberId._serialized !== jid) {
+                    console.log(`LID retry: ${jid} → ${numberId._serialized}`);
+                    msg = await client.sendMessage(numberId._serialized, message);
                 } else {
-                    cleanPhone = `${formatted}@c.us`;
+                    throw sendErr;
                 }
-            } catch (resolveErr) {
-                console.error('Failed to resolve number JID:', resolveErr);
-                cleanPhone = `${formatted}@c.us`;
+            } else {
+                throw sendErr;
             }
         }
 
-        console.log(`Sending message to ${cleanPhone}: "${message.substring(0, 30)}..."`);
-        const msg = await client.sendMessage(cleanPhone, message);
-        
-        res.json({
-            success: true,
-            message_id: msg.id.id,
-            status: 'sent'
-        });
+        res.json({ success: true, message_id: msg.id.id, status: 'sent' });
     } catch (err) {
-        console.error('Failed to send message:', err);
+        console.error('Failed to send message:', err.message);
         res.status(500).json({ success: false, error: err.message });
     }
 });
@@ -662,10 +684,18 @@ app.get('/status/list', async (req, res) => {
 
 app.post('/status/post', async (req, res) => {
     if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
-    const { text } = req.body;
-    if (!text) return res.status(400).json({ success: false, error: 'text required' });
+    const { text, mediaBase64, mediaType, caption } = req.body;
     try {
-        await client.sendMessage('status@broadcast', text);
+        if (mediaBase64 && mediaType) {
+            // Image / video status
+            const { MessageMedia } = await import('whatsapp-web.js');
+            const media = new MessageMedia(mediaType, mediaBase64);
+            const opts = caption ? { caption } : {};
+            await client.sendMessage('status@broadcast', media, opts);
+        } else {
+            if (!text) return res.status(400).json({ success: false, error: 'text or mediaBase64 required' });
+            await client.sendMessage('status@broadcast', text);
+        }
         res.json({ success: true, message: 'Status posted' });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });

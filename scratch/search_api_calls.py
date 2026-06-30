@@ -1,4 +1,22 @@
-with open("C:/Users/ELCOT/Desktop/project/whatsapp-automate/frontend/src/pages/Automations/Automations.jsx", "r", encoding="utf-8") as f:
-    for idx, line in enumerate(f, 1):
-        if "onSave" in line or "automationsApi.create" in line or "automationsApi.update" in line:
-            print(f"{idx}: {line.strip()}")
+import os
+import sys
+
+sys.stdout.reconfigure(encoding='utf-8')
+frontend_dir = "C:/Users/ELCOT/Desktop/project/whatsapp-automate/frontend"
+matches = []
+
+for root, dirs, files in os.walk(frontend_dir):
+    for file in files:
+        if file.endswith((".jsx", ".js")) and "node_modules" not in root:
+            path = os.path.join(root, file)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    for line_no, line in enumerate(f, 1):
+                        if "search" in line or "contacts" in line:
+                            if "api" in line or "Api" in line or "fetch" in line:
+                                matches.append(f"{path}:{line_no}: {line.strip()}")
+            except Exception:
+                pass
+
+for m in matches[:100]:
+    print(m)

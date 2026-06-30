@@ -3,8 +3,10 @@ Messages Routes — Send, list, filter messages, SSE stream
 """
 import asyncio
 import json
+import re
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.orm import Session
 from database.connection import get_db
@@ -108,7 +110,7 @@ async def messages_by_contact(
     return messages_service.get_messages(db, page=page, limit=limit, contact_id=contact_id)
 
 
-@router.get("/{message_id}")
+@router.get("/{message_id:int}")
 async def get_message(message_id: int, db: Session = Depends(get_db)):
     """Get a single message by ID."""
     from models.models import Message
@@ -116,3 +118,80 @@ async def get_message(message_id: int, db: Session = Depends(get_db)):
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
     return msg
+
+
+# ─── Grammar & Spell Check ─────────────────────────────────────
+
+class GrammarCheckRequest(BaseModel):
+    text: str
+    language: str = "en-US"
+
+# Spans to skip during correction (URLs, phone numbers, backtick code)
+_SKIP_PATTERNS = re.compile(
+    r'https?://\S+'             # URLs
+    r'|`[^`]+`'                 # inline code
+    r'|\+?\d[\d\s\-()]{6,}\d'  # phone numbers (7+ digit sequences)
+)
+
+
+def _apply_corrections(text: str, matches: list) -> str:
+    """Apply LanguageTool replacements in reverse order, skipping URL/phone spans."""
+    skip_spans = {(m.start(), m.end()) for m in _SKIP_PATTERNS.finditer(text)}
+
+    def _overlaps_skip(off, ln):
+        end = off + ln
+        return any(s <= off < e or s < end <= e for s, e in skip_spans)
+
+    corrected = text
+    offset_shift = 0
+    for match in sorted(matches, key=lambda m: m["offset"]):
+        if not match.get("replacements"):
+            continue
+        orig_off = match["offset"]
+        orig_len = match["length"]
+        if _overlaps_skip(orig_off, orig_len):
+            continue
+        replacement = match["replacements"][0]["value"]
+        adj_off = orig_off + offset_shift
+        corrected = corrected[:adj_off] + replacement + corrected[adj_off + orig_len:]
+        offset_shift += len(replacement) - orig_len
+
+    return corrected
+
+
+@router.post("/check-grammar")
+async def check_grammar(data: GrammarCheckRequest):
+    """Check spelling and grammar via LanguageTool free public API.
+
+    Passes raw text directly — LanguageTool natively ignores most URLs.
+    Post-processing skips corrections that would touch URL/phone spans.
+    Returns matches (with position/suggestion info) and a pre-computed corrected string.
+    """
+    import httpx
+    text = data.text.strip()
+    if not text or len(text) < 3:
+        return {"matches": [], "corrected": text, "issues": 0}
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.post(
+                "https://api.languagetool.org/v2/check",
+                data={"text": text, "language": data.language},
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        if r.status_code == 429:
+            return {"matches": [], "corrected": text, "issues": 0, "error": "Rate limit — try again in a moment"}
+        if r.status_code != 200:
+            return {"matches": [], "corrected": text, "issues": 0}
+
+        result = r.json()
+        matches = result.get("matches", [])
+        corrected = _apply_corrections(text, matches)
+
+        return {
+            "matches": matches,
+            "corrected": corrected,
+            "issues": len(matches),
+        }
+    except Exception:
+        return {"matches": [], "corrected": text, "issues": 0}

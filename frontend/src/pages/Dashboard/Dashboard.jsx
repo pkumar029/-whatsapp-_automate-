@@ -395,20 +395,15 @@ function AnalyticsChart({ displaySummary }) {
 
 // ─── Main Dashboard Page ──────────────────────────────────────
 export default function Dashboard() {
-  const { profile } = useApp()
+  const { profile, sessionStatus } = useApp()
   const [summary, setSummary] = useState(null)
-  const [sessionStatus, setSessionStatus] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [summaryRes, statusRes] = await Promise.allSettled([
-          dashboardApi.getSummary(),
-          whatsappApi.getStatus(),
-        ])
-        if (summaryRes.status === 'fulfilled') setSummary(summaryRes.value.data)
-        if (statusRes.status === 'fulfilled') setSessionStatus(statusRes.value.data)
+        const summaryRes = await dashboardApi.getSummary()
+        setSummary(summaryRes.data)
       } catch (err) {
         console.error('Dashboard fetch error:', err)
       } finally {
@@ -416,7 +411,7 @@ export default function Dashboard() {
       }
     }
     fetchData()
-  }, [])
+  }, [sessionStatus.status])
 
   const displayStatus = sessionStatus || { status: 'disconnected' }
   const isConnected = displayStatus.status === 'connected'

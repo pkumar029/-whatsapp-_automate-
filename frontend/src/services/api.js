@@ -28,12 +28,7 @@ api.interceptors.request.use(
 // ─── Response Interceptor ────────────────────────────────────
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('wa_token')
-    }
-    return Promise.reject(error)
-  }
+  (error) => Promise.reject(error)
 )
 
 // ─── WhatsApp API ─────────────────────────────────────────────
@@ -73,6 +68,7 @@ export const messagesApi = {
   send: (data) => api.post('/messages/send', data),
   getByContact: (contactId, params) => api.get(`/messages/contact/${contactId}`, { params }),
   sync: () => api.post('/messages/sync'),
+  checkGrammar: (data) => api.post('/messages/check-grammar', data),
 }
 
 // ─── Automations API ─────────────────────────────────────────
@@ -141,6 +137,22 @@ export const groupsApi = {
 export const statusApi = {
   list: () => api.get('/contacts/status/list'),
   post: (data) => api.post('/contacts/status/post', data),
+}
+
+// ─── Auth API ─────────────────────────────────────────────────
+export const authApi = {
+  login: (data) => api.post('/auth/login', data),
+  me: () => api.get('/auth/me'),
+  updateMe: (data) => api.put('/auth/me', data),
+  changePassword: (data) => api.post('/auth/change-password', data),
+}
+
+// ─── AI Smart Reply ───────────────────────────────────────────
+export const aiApi = {
+  getSettings: () => api.get('/ai/settings'),
+  saveSettings: (data) => api.post('/ai/settings', data),
+  generateReply: (data) => api.post('/ai/reply', data),
+  testConnection: () => api.post('/ai/test'),
 }
 
 // ─── Dashboard Summary ────────────────────────────────────────
