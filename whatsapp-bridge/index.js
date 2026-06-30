@@ -289,7 +289,9 @@ app.post('/disconnect', async (req, res) => {
 
     try {
         console.log('Disconnecting/Logging out client...');
-        await client.logout();
+        if (clientStatus === 'connected') {
+            await client.logout();
+        }
         await client.destroy();
     } catch (e) {
         console.warn('Error during logout/destroy:', e);
@@ -441,8 +443,8 @@ app.get('/contacts', async (req, res) => {
                 const isGroup = c.isGroup || jid.endsWith('@g.us');
                 if (isGroup) return true;
 
-                // For regular user contacts: must be a saved/active/known WhatsApp contact
-                return c.isMyContact === true || c.fromActiveChat === true || c.isWAContact === true;
+                // Only sync contacts explicitly saved in the phone's address book
+                return c.isMyContact === true;
             })
             .map(c => {
                 const jid = c.id._serialized;
