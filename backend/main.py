@@ -140,7 +140,10 @@ app.add_middleware(
 @app.get("/health", tags=["System"])
 async def health_check():
     """Health check endpoint — returns service status."""
-    db_ok = check_db_connection()
+    import asyncio
+    # Run the synchronous DB ping in a thread so it never blocks the event loop
+    loop = asyncio.get_event_loop()
+    db_ok = await loop.run_in_executor(None, check_db_connection)
     return {
         "status": "healthy" if db_ok else "degraded",
         "service": settings.APP_NAME,

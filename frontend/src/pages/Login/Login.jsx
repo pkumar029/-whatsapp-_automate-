@@ -49,6 +49,7 @@ export default function Login() {
   const [message, setMessage] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
   const [backendOk, setBackendOk] = useState(null) // null=checking, true, false
+  const failCountRef = useRef(0)
 
   // True while view === 'connecting'; read in unmount cleanup (can't use state there)
   const connectingRef = useRef(false)
@@ -96,17 +97,26 @@ export default function Login() {
     }
   }, [sessionStatus.status, view])
 
-  // Backend connectivity check
+  // Backend connectivity check — require 2 consecutive failures before showing the banner
+  // so a single transient hiccup (e.g. backend still starting) doesn't trigger a false alarm
   useEffect(() => {
     let cancelled = false
     const check = () => {
       healthApi.check()
-        .then(() => { if (!cancelled) setBackendOk(true) })
-        .catch(() => { if (!cancelled) setBackendOk(false) })
+        .then(() => {
+          if (!cancelled) { failCountRef.current = 0; setBackendOk(true) }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            failCountRef.current += 1
+            if (failCountRef.current >= 2) setBackendOk(false)
+          }
+        })
     }
-    check()
+    // Small delay before the first check so the backend has a moment to finish startup
+    const t = setTimeout(check, 1500)
     const iv = setInterval(check, 10000)
-    return () => { cancelled = true; clearInterval(iv) }
+    return () => { cancelled = true; clearTimeout(t); clearInterval(iv) }
   }, [])
 
   // Poll status only while the QR/pairing view is visible — prevents ghost polling when
@@ -178,16 +188,22 @@ export default function Login() {
     }
   }
 
-  const handleCancel = () => {
-    // Navigate back immediately — don't wait for the async disconnect
+  const handleCancel = async () => {
+    setConnecting(true)
+    setMessage('Cancelling session... Please wait.')
+    setErrorMsg('')
+    try {
+      await whatsappApi.disconnect()
+    } catch (e) {
+      console.error(e)
+    }
     setQrCode(null)
     setPairingCode(null)
     setMessage('')
     setErrorMsg('')
     setView('method')
-    // Fire-and-forget disconnect in background
-    whatsappApi.disconnect().catch(() => {})
-    refreshSessionStatus().catch(() => {})
+    setConnecting(false)
+    await refreshSessionStatus()
   }
 
   return (
@@ -443,8 +459,17 @@ export default function Login() {
             </div>
           )}
 
-          <button className="btn btn-secondary" onClick={handleCancel} style={{ width: '100%' }}>
-            Cancel &amp; Start Over
+          <button
+            className="btn btn-secondary"
+            onClick={handleCancel}
+            disabled={connecting}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+          >
+            {connecting ? (
+              <><RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> Cancelling...</>
+            ) : (
+              'Cancel & Start Over'
+            )}
           </button>
         </div>
       )}
