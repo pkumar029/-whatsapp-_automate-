@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   QrCode, RefreshCw, Key, HelpCircle, Lock,
@@ -38,7 +38,7 @@ export default function Login() {
 
   const [connectionType, setConnectionType] = useState('bridge')
   const [bridgeLinkMethod, setBridgeLinkMethod] = useState('qr') // qr | otp
-  const [phone, setPhone] = useState(() => localStorage.getItem('wa_last_phone') || '')
+  const [phone, setPhone] = useState('')
   const [metaToken, setMetaToken] = useState('')
   const [metaPhoneNumberId, setMetaPhoneNumberId] = useState('')
   const [metaBusinessAccountId, setMetaBusinessAccountId] = useState('')
