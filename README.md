@@ -12,7 +12,8 @@
 | Backend | Python FastAPI + Uvicorn |
 | Database | MySQL 8.x |
 | WhatsApp | pywa (Python WhatsApp Web library) |
-| Auth | JWT (planned) |
+| Auth | JWT (implemented) |
+| AI | Claude API (grammar check) |
 
 ---
 
@@ -131,9 +132,11 @@ npm run dev
 | 📊 Dashboard | Summary cards — automations, contacts, messages, WhatsApp status |
 | 🤖 Automations | Create and manage n8n-style automation workflows |
 | 👥 Contacts | Manage WhatsApp contacts with search and filtering |
-| 💬 Messages | Compose and track inbound/outbound messages |
+| 💬 Messages | Compose and track inbound/outbound messages with AI grammar check |
+| 📣 Campaigns | Bulk message campaigns to contact groups |
+| 🟢 Status | View and post WhatsApp status updates with media support |
 | 📋 Logs | View automation execution history and error details |
-| ⚙️ Settings | Configure WhatsApp session and system preferences |
+| ⚙️ Settings | Configure WhatsApp session, AI features, and system preferences |
 
 ---
 
@@ -153,6 +156,9 @@ npm run dev
 | GET | `/api/v1/automations` | List automations |
 | POST | `/api/v1/automations` | Create automation |
 | GET | `/api/v1/logs` | View execution logs |
+| POST | `/api/v1/auth/login` | Authenticate user (JWT) |
+| POST | `/api/v1/auth/refresh` | Refresh JWT token |
+| POST | `/api/v1/ai/grammar-check` | AI grammar & spell check |
 
 ---
 
@@ -169,6 +175,41 @@ WA-005/whatsapp-auth-integration
 ---
 
 ## 📋 Changelog
+
+### v2.2.0 — AI Features, Status Overhaul & Contact Hygiene (2026-06-30)
+
+#### ✅ AI Grammar Check in Messages
+- New `useGrammarCheck` hook calls the backend AI service to check spelling and grammar as you type.
+- `GrammarBar` component in the message composer shows issue count, detected language, and a one-click correction preview.
+- Auto-correct mode silently applies the AI suggestion without interrupting the flow.
+- Backed by new `POST /api/v1/ai/grammar-check` endpoint and `ai_service.py`.
+
+#### ✅ JWT Authentication (Implemented)
+- New `backend/routes/auth.py` and `backend/services/auth_service.py` wire up JWT login and token refresh.
+- Auth router registered at `/api/v1/auth`; all protected endpoints now validate Bearer tokens.
+
+#### ✅ Status Page — Full Overhaul
+- Viewer modal: tap any contact's status ring to open a full-screen story-style viewer.
+- Media upload: post image or text statuses with a preview before sending.
+- Skeleton loading cards while statuses are fetched.
+- `timeAgo()` helper displays relative timestamps (e.g. "3h ago").
+- Seen/unseen indicators per status item.
+
+#### ✅ Contact Hygiene
+- Phone number validity filter extended to 16 characters (was 14) to accommodate longer international numbers.
+- Startup migration marks obviously invalid contacts (`is_valid = 0`) — non-`+` prefixed numbers, non-group addresses with `@` in unexpected positions.
+- WhatsApp profile auto-synced to the database immediately on login (name, avatar, status).
+
+#### ✅ Message History Isolation
+- Each message row is isolated by `wa_account` so conversations never bleed across accounts.
+- Sync state tracked in AppContext; Messages page refetches automatically after sync completes without a manual refresh.
+
+#### ✅ Keyboard Shortcuts Refactor
+- All shortcuts consolidated into `SHORTCUT_GROUPS` exported from `useKeyboardShortcuts.js`.
+- `KeyboardShortcutsModal` and Settings page both source from the same registry — no duplicate definitions.
+- Shortcuts can be globally enabled / disabled via `getShortcutsEnabled` / `setShortcutsEnabled`.
+
+---
 
 ### v2.1.0 — Account Isolation & Login Reliability (2026-06-29)
 
