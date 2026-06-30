@@ -50,7 +50,17 @@ export default function Login() {
   const [errorMsg, setErrorMsg] = useState('')
   const [backendOk, setBackendOk] = useState(null) // null=checking, true, false
 
-  // On mount: always reset to clean splash state
+  // True while view === 'connecting'; read in unmount cleanup (can't use state there)
+  const connectingRef = useRef(false)
+  useEffect(() => { connectingRef.current = (view === 'connecting') }, [view])
+
+  // Prevents the unmount cleanup from cancelling a session that just connected successfully
+  const didConnectRef = useRef(false)
+
+  // On mount: reset all state and cancel any leftover bridge 'connecting' session from
+  // a prior visit (e.g. user pressed browser Back from the QR screen).
+  // On unmount: if the user leaves mid-connection without scanning (browser Back),
+  // cancel the bridge so it doesn't keep a ghost session alive.
   useEffect(() => {
     setView('splash')
     setQrCode(null)
@@ -58,11 +68,21 @@ export default function Login() {
     setMessage('')
     setErrorMsg('')
     setPhone('')
+    didConnectRef.current = false
+    if (sessionStatus.status === 'connecting') {
+      whatsappApi.disconnect().catch(() => {})
+    }
+    return () => {
+      if (connectingRef.current && !didConnectRef.current) {
+        whatsappApi.disconnect().catch(() => {})
+      }
+    }
   }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Redirect to dashboard as soon as WhatsApp is connected
   useEffect(() => {
     if (sessionStatus.status === 'connected') {
+      didConnectRef.current = true
       navigate('/dashboard')
     }
   }, [sessionStatus.status, navigate])
@@ -89,25 +109,23 @@ export default function Login() {
     return () => { cancelled = true; clearInterval(iv) }
   }, [])
 
-  // Poll status while connecting — navigate immediately when connected
+  // Poll status only while the QR/pairing view is visible — prevents ghost polling when
+  // the user returns to splash after pressing Back from the connecting screen
   useEffect(() => {
-    let interval = null
-    if (sessionStatus.status === 'connecting' || view === 'connecting') {
-      interval = setInterval(() => {
-        refreshSessionStatus().then(data => {
-          if (data?.status === 'connected') {
-            navigate('/dashboard')
-            return
-          }
-          if (data?.qr) setQrCode(data.qr)
-          else setQrCode(null)
-          if (data?.pairing_code) setPairingCode(data.pairing_code)
-          else setPairingCode(null)
-        }).catch(() => {})
-      }, 2000)
-    }
-    return () => { if (interval) clearInterval(interval) }
-  }, [sessionStatus.status, view, refreshSessionStatus, navigate])
+    if (view !== 'connecting') return
+    const interval = setInterval(() => {
+      refreshSessionStatus().then(data => {
+        if (data?.status === 'connected') {
+          didConnectRef.current = true
+          navigate('/dashboard')
+          return
+        }
+        setQrCode(data?.qr || null)
+        setPairingCode(data?.pairing_code || null)
+      }).catch(() => {})
+    }, 2000)
+    return () => clearInterval(interval)
+  }, [view, refreshSessionStatus, navigate])
 
   const handleSelectMethod = (id) => {
     setConnectionType(id)
@@ -123,7 +141,6 @@ export default function Login() {
     setErrorMsg('')
     setQrCode(null)
     setPairingCode(null)
-    if (phone) localStorage.setItem('wa_last_phone', phone)
 
     const config = {
       connection_type: connectionType,
@@ -140,6 +157,7 @@ export default function Login() {
       if (res.data?.pairing_code) setPairingCode(res.data.pairing_code)
 
       if (res.data?.status === 'connected') {
+        didConnectRef.current = true
         await refreshSessionStatus()
         navigate('/dashboard')
         return
