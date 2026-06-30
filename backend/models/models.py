@@ -139,6 +139,7 @@ class Contact(Base):
     is_active = Column(Boolean, default=True)
     is_blocked = Column(Boolean, default=False)
     is_valid = Column(Boolean, default=True, nullable=False)  # system flag: False = invalid/system contact
+    is_my_contact = Column(Boolean, default=False)  # True = saved in phone's address book
     wa_account = Column(String(100), nullable=True)   # connected WhatsApp phone that owns this contact
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

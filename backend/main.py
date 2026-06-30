@@ -68,10 +68,16 @@ async def lifespan(app: FastAPI):
          "UPDATE contacts SET is_valid = 0 WHERE "
          "(phone LIKE '%@%' AND phone NOT LIKE '%@g.us') "
          "OR phone NOT LIKE '+%' "
-         "OR (phone NOT LIKE '%@g.us' AND CHAR_LENGTH(phone) > 16)"),
+         "OR (phone NOT LIKE '%@g.us' AND CHAR_LENGTH(phone) > 14)"),
         ("contacts hide auto-created unsaved",
          "UPDATE contacts SET is_valid = 0 WHERE "
-         "name LIKE 'WhatsApp User %' OR name = phone"),
+         "name LIKE 'WhatsApp User %' OR name = phone OR name REGEXP '^[0-9]{7,}$'"),
+        ("contacts is_my_contact column",
+         "ALTER TABLE contacts ADD COLUMN is_my_contact TINYINT(1) NOT NULL DEFAULT 0"),
+        ("contacts is_my_contact backfill",
+         "UPDATE contacts SET is_my_contact = 1 WHERE is_valid = 1 AND is_active = 1"),
+        ("contacts is_my_contact index",
+         "ALTER TABLE contacts ADD INDEX idx_contact_my_contact (is_my_contact)"),
         ("whatsapp_profiles table",
          "CREATE TABLE IF NOT EXISTS whatsapp_profiles ("
          "  id INT AUTO_INCREMENT PRIMARY KEY,"

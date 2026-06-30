@@ -761,6 +761,7 @@ app.get('/sync-messages', async (req, res) => {
     const msgLimit = parseInt(req.query.msgLimit) || 50;   // messages per chat
     const chatLimit = parseInt(req.query.chatLimit) || 60; // number of chats
     try {
+        const VALID_PHONE_RE = /^\+\d{7,13}$/;
         const chats = await client.getChats();
         const result = [];
         for (const chat of chats.slice(0, chatLimit)) {
@@ -769,7 +770,12 @@ app.get('/sync-messages', async (req, res) => {
                 phone = chat.id._serialized;
                 name = chat.name;
             } else {
+                // Skip system / device JIDs
+                const server = chat.id.server;
+                if (server === 'lid' || server === 'newsletter' || server === 'broadcast') continue;
                 phone = '+' + chat.id.user;
+                // Skip numbers with wrong digit count (pseudo-IDs, test numbers, etc.)
+                if (!VALID_PHONE_RE.test(phone)) continue;
                 try {
                     const contact = await chat.getContact();
                     name = contact.name || contact.pushname || phone;

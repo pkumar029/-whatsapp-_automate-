@@ -114,8 +114,8 @@ def sync_message_history(db: Session) -> dict:
     Deduplicates by whatsapp_message_id — safe to call repeatedly.
     """
     import httpx
-    from services.contacts_service import get_contact_by_phone, create_contact
-    from models.schemas import ContactCreate
+    import re as _re
+    from services.contacts_service import get_contact_by_phone
 
     wa_account = _active_account(db)
     if not wa_account:
@@ -136,17 +136,36 @@ def sync_message_history(db: Session) -> dict:
     messages_saved = 0
     messages_skipped = 0
 
+    # WhatsApp-specific phone length limit (mirrors bridge contacts filter)
+    _WA_PHONE_RE = _re.compile(r'^\+\d{7,13}$')
+
     for chat in data.get("chats", []):
         phone = chat.get("phone")
         name = chat.get("name") or phone
         chat_messages = chat.get("messages", [])
+        is_group = chat.get("isGroup", False)
         if not phone or not chat_messages:
+            continue
+
+        # Skip non-group chats with invalid/too-long phone numbers
+        if not is_group and not _WA_PHONE_RE.match(phone):
+            logger.debug(f"sync_message_history: skipping invalid phone {phone!r}")
             continue
 
         # Resolve or create contact
         contact = get_contact_by_phone(db, phone)
         if not contact:
-            contact = create_contact(db, ContactCreate(name=name, phone=phone))
+            # Auto-created from chat history — not a saved address-book contact.
+            # is_valid=True so the conversation appears in Messages; is_my_contact=False
+            # keeps it out of the Contacts page.
+            contact = Contact(
+                name=name, phone=phone,
+                wa_account=wa_account,
+                is_valid=True, is_my_contact=False,
+            )
+            db.add(contact)
+            db.commit()
+            db.refresh(contact)
         if not contact.wa_account:
             contact.wa_account = wa_account
             db.add(contact)

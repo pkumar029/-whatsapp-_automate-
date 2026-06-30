@@ -20,6 +20,7 @@ async def list_contacts(
     search: Optional[str] = Query(None),
     is_active: Optional[bool] = Query(None),
     wa_account: Optional[str] = Query(None),
+    saved_only: bool = Query(False, description="When true, return only address-book contacts"),
     db: Session = Depends(get_db)
 ):
     """List contacts with pagination and optional search."""
@@ -28,10 +29,10 @@ async def list_contacts(
         session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
         if session:
             wa_account = session.phone
-            
+
     return contacts_service.get_contacts(
         db, page=page, limit=limit, search=search,
-        is_active=is_active, wa_account=wa_account
+        is_active=is_active, wa_account=wa_account, saved_only=saved_only
     )
 
 

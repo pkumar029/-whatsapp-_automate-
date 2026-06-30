@@ -58,11 +58,13 @@ def get_contacts(
     search: Optional[str] = None,
     is_active: Optional[bool] = None,
     wa_account: Optional[str] = None,
+    saved_only: bool = False,
 ) -> dict:
     """List contacts with pagination and search.
 
     wa_account is REQUIRED for results — returns empty when no account is active
     so logged-out users never see another account's contacts.
+    saved_only=True restricts to contacts saved in the phone's address book.
     """
     if not wa_account:
         return {"contacts": [], "total": 0, "page": page, "limit": limit}
@@ -72,6 +74,8 @@ def get_contacts(
         Contact.wa_account == wa_account,
         Contact.is_valid == True,
     )
+    if saved_only:
+        query = query.filter(Contact.is_my_contact == True)
 
     if search:
         search_term = f"%{search}%"
@@ -105,7 +109,12 @@ def get_contact_by_phone(db: Session, phone: str) -> Optional[Contact]:
     return db.query(Contact).filter(Contact.phone == phone).first()
 
 
-def create_contact(db: Session, data: ContactCreate, wa_account: Optional[str] = None) -> Contact:
+def create_contact(
+    db: Session,
+    data: ContactCreate,
+    wa_account: Optional[str] = None,
+    is_my_contact: bool = True,
+) -> Contact:
     # Use wa_account from data if provided, otherwise from parameter, otherwise from active session
     resolved_wa_account = data.wa_account or wa_account
     if not resolved_wa_account:
@@ -120,6 +129,9 @@ def create_contact(db: Session, data: ContactCreate, wa_account: Optional[str] =
         # Adopt / backfill properties rather than throwing 409 Conflict
         existing.is_valid = True
         existing.is_active = True
+        # Only promote is_my_contact, never demote (once saved, always saved)
+        if is_my_contact:
+            existing.is_my_contact = True
         if resolved_wa_account:
             existing.wa_account = resolved_wa_account
         if data.name:
@@ -142,6 +154,7 @@ def create_contact(db: Session, data: ContactCreate, wa_account: Optional[str] =
         notes=data.notes,
         tags=data.tags,
         wa_account=resolved_wa_account,
+        is_my_contact=is_my_contact,
     )
     db.add(contact)
     db.commit()
@@ -261,6 +274,10 @@ def sync_whatsapp_contacts(db: Session) -> dict:
                     if existing.is_valid != valid:
                         existing.is_valid = valid
                         changed = True
+                    # Contacts from bridge are always saved in the phone's address book
+                    if not existing.is_my_contact:
+                        existing.is_my_contact = True
+                        changed = True
 
                     curr_tags = existing.tags or []
                     if not isinstance(curr_tags, list):
@@ -280,6 +297,7 @@ def sync_whatsapp_contacts(db: Session) -> dict:
                     contact = Contact(
                         name=name, phone=phone,
                         is_active=True, is_valid=valid,
+                        is_my_contact=True,
                         tags=tags, wa_account=current_phone,
                     )
                     db.add(contact)

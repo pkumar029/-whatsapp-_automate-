@@ -104,9 +104,9 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
         from services import contacts_service
         contact = contacts_service.get_contact_by_phone(db, phone)
         if not contact:
-            # Auto-create a minimal contact so the message has a foreign-key target,
-            # but mark is_valid=False so it never appears in the Contacts list.
-            # The user can promote it to a real contact by adding it explicitly.
+            # Auto-create a minimal contact so the message has a foreign-key target.
+            # is_my_contact=False keeps it off the Contacts page (not in address book);
+            # is_valid=True so the conversation still appears in the Messages page.
             from models.models import Contact as ContactModel
             active_session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
             contact = ContactModel(
@@ -114,7 +114,8 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
                 phone=phone,
                 tags=payload.tags or [],
                 wa_account=active_session.phone if active_session else None,
-                is_valid=False,
+                is_valid=True,
+                is_my_contact=False,
             )
             db.add(contact)
             db.commit()

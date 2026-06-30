@@ -1,19 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Users, Plus, Search, Edit2, Trash2, Phone, X, Check, RefreshCw, WifiOff, Megaphone, User, EyeOff, Eye, Download, Upload, Mail } from 'lucide-react'
+import { Users, Plus, Search, Edit2, Trash2, Phone, X, Check, RefreshCw, WifiOff, Megaphone, User, Download, Upload, Mail } from 'lucide-react'
 import { contactsApi, whatsappApi } from '../../services/api'
 import { useApp } from '../../context/AppContext'
 import { Link } from 'react-router-dom'
 import { formatISTDate } from '../../utils/date'
 import { getErrorMessage } from '../../utils/error'
-
-// Returns true only for contacts auto-created by the inbound webhook
-// (not saved by user, created when an unknown number messages us)
-function isAutoContact(c) {
-  const name = (c.name || '').trim()
-  if (/^WhatsApp User/i.test(name)) return true
-  if (/^Unnamed Broadcast/i.test(name)) return true
-  return false
-}
 
 // ─── Contact Form Modal ───────────────────────────────────────
 function ContactModal({ contact, onClose, onSave }) {
@@ -99,7 +90,6 @@ export default function Contacts() {
   const [showModal, setShowModal] = useState(false)
   const [editContact, setEditContact] = useState(null)
   const [deleteId, setDeleteId] = useState(null)
-  const [showAutoContacts, setShowAutoContacts] = useState(false)
   const [profilePics, setProfilePics] = useState({}) // contactId → url | null
 
   // Sync states
@@ -120,7 +110,7 @@ export default function Contacts() {
   const fetchContacts = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await contactsApi.getAll({ search, page: 1, limit: 500 })
+      const res = await contactsApi.getAll({ search, page: 1, limit: 500, saved_only: true })
       setContacts(res.data?.contacts || res.data || [])
     } catch {
       setContacts([])
@@ -213,21 +203,15 @@ export default function Contacts() {
     }
   }
 
-  // Split contacts into real vs auto-created
-  const realContacts = contacts.filter(c => !isAutoContact(c))
-  const autoContacts = contacts.filter(c => isAutoContact(c))
-
-  // Apply type filter on real contacts (or all if toggle is on)
-  const baseContacts = showAutoContacts ? contacts : realContacts
-
+  // Backend already returns only saved contacts (saved_only=true); no client-side split needed
   const counts = {
-    all: baseContacts.length,
-    individual: baseContacts.filter(c => !c.tags?.includes('Group') && !c.tags?.includes('Team')).length,
-    group: baseContacts.filter(c => c.tags?.includes('Group')).length,
-    team: baseContacts.filter(c => c.tags?.includes('Team')).length,
+    all: contacts.length,
+    individual: contacts.filter(c => !c.tags?.includes('Group') && !c.tags?.includes('Team')).length,
+    group: contacts.filter(c => c.tags?.includes('Group')).length,
+    team: contacts.filter(c => c.tags?.includes('Team')).length,
   }
 
-  const filteredContacts = baseContacts.filter(c => {
+  const filteredContacts = contacts.filter(c => {
     const isGroup = c.tags?.includes('Group')
     const isTeam = c.tags?.includes('Team')
     const type = isGroup ? 'group' : (isTeam ? 'team' : 'individual')
@@ -269,20 +253,9 @@ export default function Contacts() {
       <div className="page-header">
         <div>
           <h2 className="page-title">Contacts</h2>
-          <p className="page-subtitle">{counts.all} contacts{autoContacts.length > 0 && !showAutoContacts ? ` · ${autoContacts.length} auto-created hidden` : ''}</p>
+          <p className="page-subtitle">{counts.all} contacts</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {autoContacts.length > 0 && (
-            <button
-              className="btn btn-ghost"
-              onClick={() => setShowAutoContacts(v => !v)}
-              title={showAutoContacts ? 'Hide auto-created contacts' : `Show ${autoContacts.length} auto-created contacts`}
-              style={{ fontSize: 'var(--font-size-xs)', gap: 6 }}
-            >
-              {showAutoContacts ? <EyeOff size={15} /> : <Eye size={15} />}
-              {showAutoContacts ? 'Hide system' : `+${autoContacts.length} system`}
-            </button>
-          )}
           <button className="btn btn-ghost" onClick={handleExport} title="Export contacts as CSV">
             <Download size={15} /> Export CSV
           </button>
@@ -384,7 +357,6 @@ export default function Contacts() {
               {filteredContacts.map(c => {
                 const isGroup = c.tags?.includes('Group')
                 const isTeam = c.tags?.includes('Team')
-                const isAuto = isAutoContact(c)
 
                 const picUrl = !isGroup && !isTeam ? (profilePics[c.id] || null) : null
 
@@ -394,7 +366,7 @@ export default function Contacts() {
                 else if (isTeam) { badgeClass = 'badge-teal'; badgeLabel = 'Team' }
 
                 return (
-                  <tr key={c.id} style={{ opacity: isAuto ? 0.65 : 1 }}>
+                  <tr key={c.id}>
                     <td className="td-primary" style={{ display: 'flex', alignItems: 'center', gap: 10, borderTop: 'none' }}>
                       <div style={{
                         width: 34, height: 34, borderRadius: '50%',
@@ -413,9 +385,6 @@ export default function Contacts() {
                       </div>
                       <div>
                         <span style={{ fontWeight: (isGroup || isTeam) ? 600 : 500 }}>{c.name}</span>
-                        {isAuto && (
-                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>auto-created</div>
-                        )}
                       </div>
                     </td>
                     <td style={{ borderTop: 'none' }}>
