@@ -361,21 +361,26 @@ def process_scheduled_automations(db: Session, now: datetime):
 
 
 async def run_queue_worker_loop():
-    """Asynchronous infinite loop that runs every 5 seconds to process due jobs and cron triggers."""
+    """Async loop that ticks every 5 s; heavy DB/HTTP work runs in a thread
+    so the event loop is never blocked."""
     from database.connection import SessionLocal
+    loop = asyncio.get_event_loop()
     logger.info("Queue worker background loop started.")
-    last_cron_check = None
+    last_cron_check: list = [None]   # list so the nested fn can mutate it
+
+    def _tick():
+        from database.connection import SessionLocal as _SL
+        with _SL() as db:
+            process_due_jobs(db)
+            now = datetime.utcnow()
+            current_min = now.replace(second=0, microsecond=0)
+            if last_cron_check[0] is None or current_min > last_cron_check[0]:
+                last_cron_check[0] = current_min
+                process_scheduled_automations(db, now)
+
     while True:
         try:
-            with SessionLocal() as db:
-                process_due_jobs(db)
-                
-                # Check scheduled automations once a minute (when the minute changes)
-                now = datetime.utcnow()
-                current_min = now.replace(second=0, microsecond=0)
-                if last_cron_check is None or current_min > last_cron_check:
-                    last_cron_check = current_min
-                    process_scheduled_automations(db, now)
+            await loop.run_in_executor(None, _tick)
         except Exception as err:
             logger.error(f"Error in queue worker loop iteration: {err}", exc_info=True)
         await asyncio.sleep(5)

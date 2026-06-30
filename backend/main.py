@@ -82,19 +82,21 @@ async def lifespan(app: FastAPI):
          "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
          ")"),
     ]
-    for _name, _sql_str in _migrations:
-        try:
-            with engine.connect() as _conn:
-                _conn.execute(_sql(_sql_str))
-                _conn.commit()
-            logger.info(f"✅ Migration OK: {_name}")
-        except Exception as _e:
-            _msg = str(_e)
-            if "Duplicate column" not in _msg and "already exists" not in _msg.lower():
-                logger.warning(f"Migration note ({_name}): {_msg}")
-
-    # Start the queue worker background loop
     import asyncio
+    def _run_migrations():
+        for _name, _sql_str in _migrations:
+            try:
+                with engine.connect() as _conn:
+                    _conn.execute(_sql(_sql_str))
+                    _conn.commit()
+                logger.info(f"✅ Migration OK: {_name}")
+            except Exception as _e:
+                _msg = str(_e)
+                if "Duplicate column" not in _msg and "already exists" not in _msg.lower():
+                    logger.warning(f"Migration note ({_name}): {_msg}")
+
+    await asyncio.get_event_loop().run_in_executor(None, _run_migrations)
+
     from services.queue_service import run_queue_worker_loop
     worker_task = asyncio.create_task(run_queue_worker_loop())
     
