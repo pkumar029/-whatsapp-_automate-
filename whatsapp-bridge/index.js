@@ -56,6 +56,28 @@ let pairingCode = null;
 let lastError = null;
 let currentLinkMethod = 'qr';
 
+// True only when the WhatsApp client AND its Puppeteer browser page are alive.
+// client.pupPage can be null even when clientStatus === 'connected' if the
+// browser process crashed — guard every API handler with this.
+function isClientReady() {
+    return clientStatus === 'connected' && client != null && client.pupPage != null;
+}
+
+// Called from catch blocks when an "evaluate" / pupPage error is detected.
+// Marks the client as disconnected so the next guard check returns false.
+function handleClientCrash(err) {
+    if (err && err.message && (
+        err.message.includes('evaluate') ||
+        err.message.includes('pupPage') ||
+        err.message.includes('Target closed') ||
+        err.message.includes('Session closed')
+    )) {
+        console.warn('[bridge] Puppeteer page crash detected — resetting client status to disconnected');
+        clientStatus = 'disconnected';
+        client = null;
+    }
+}
+
 // Initialize WhatsApp client
 async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
     currentLinkMethod = linkMethod;
@@ -348,7 +370,7 @@ app.post('/send', async (req, res) => {
         return res.status(400).json({ success: false, error: 'Phone and message are required' });
     }
 
-    if (clientStatus !== 'connected' || !client) {
+    if (!isClientReady()) {
         return res.status(400).json({ success: false, error: 'WhatsApp client is not connected' });
     }
 
@@ -378,13 +400,14 @@ app.post('/send', async (req, res) => {
 
         res.json({ success: true, message_id: msg.id.id, status: 'sent' });
     } catch (err) {
+        handleClientCrash(err);
         console.error('Failed to send message:', err.message);
         res.status(500).json({ success: false, error: err.message });
     }
 });
 
 app.get('/contacts', async (req, res) => {
-    if (clientStatus !== 'connected' || !client) {
+    if (!isClientReady()) {
         return res.status(400).json({ success: false, error: 'WhatsApp client is not connected' });
     }
 
@@ -484,6 +507,7 @@ app.get('/contacts', async (req, res) => {
             contacts: cleanContacts
         });
     } catch (err) {
+        handleClientCrash(err);
         console.error('Failed to fetch contacts:', err);
         res.status(500).json({ success: false, error: err.message });
     }
@@ -491,7 +515,7 @@ app.get('/contacts', async (req, res) => {
 
 // GET /chats — returns real WhatsApp chat list with last message + unread count
 app.get('/chats', async (req, res) => {
-    if (clientStatus !== 'connected' || !client) {
+    if (!isClientReady()) {
         return res.status(400).json({ success: false, error: 'WhatsApp client is not connected' });
     }
     try {
@@ -532,6 +556,7 @@ app.get('/chats', async (req, res) => {
         });
         res.json({ success: true, chats: result });
     } catch (e) {
+        handleClientCrash(e);
         console.error('Failed to fetch chats:', e);
         res.status(500).json({ success: false, error: e.message });
     }
@@ -539,7 +564,7 @@ app.get('/chats', async (req, res) => {
 
 // GET /group-members?groupId=... — returns participants of a WhatsApp group
 app.get('/group-members', async (req, res) => {
-    if (clientStatus !== 'connected' || !client) {
+    if (!isClientReady()) {
         return res.status(400).json({ success: false, error: 'WhatsApp client is not connected' });
     }
     const { groupId } = req.query;
@@ -563,7 +588,7 @@ app.get('/group-members', async (req, res) => {
 // ─── Phase 12: Group Management ──────────────────────────────────
 
 app.post('/group/create', async (req, res) => {
-    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
     const { name, participants } = req.body;
     if (!name || !participants?.length) return res.status(400).json({ success: false, error: 'name and participants required' });
     try {
@@ -574,7 +599,7 @@ app.post('/group/create', async (req, res) => {
 });
 
 app.post('/group/add-members', async (req, res) => {
-    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
     const { groupId, participants } = req.body;
     try {
         const chat = await client.getChatById(groupId);
@@ -585,7 +610,7 @@ app.post('/group/add-members', async (req, res) => {
 });
 
 app.post('/group/remove-member', async (req, res) => {
-    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
     const { groupId, participantId } = req.body;
     try {
         const chat = await client.getChatById(groupId);
@@ -595,7 +620,7 @@ app.post('/group/remove-member', async (req, res) => {
 });
 
 app.post('/group/promote', async (req, res) => {
-    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
     const { groupId, participantId } = req.body;
     try {
         const chat = await client.getChatById(groupId);
@@ -605,7 +630,7 @@ app.post('/group/promote', async (req, res) => {
 });
 
 app.post('/group/demote', async (req, res) => {
-    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
     const { groupId, participantId } = req.body;
     try {
         const chat = await client.getChatById(groupId);
@@ -615,7 +640,7 @@ app.post('/group/demote', async (req, res) => {
 });
 
 app.post('/group/rename', async (req, res) => {
-    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
     const { groupId, name } = req.body;
     try {
         const chat = await client.getChatById(groupId);
@@ -625,7 +650,7 @@ app.post('/group/rename', async (req, res) => {
 });
 
 app.post('/group/set-description', async (req, res) => {
-    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
     const { groupId, description } = req.body;
     try {
         const chat = await client.getChatById(groupId);
@@ -635,7 +660,7 @@ app.post('/group/set-description', async (req, res) => {
 });
 
 app.get('/group/invite-link', async (req, res) => {
-    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
     const { groupId } = req.query;
     try {
         const chat = await client.getChatById(groupId);
@@ -645,7 +670,7 @@ app.get('/group/invite-link', async (req, res) => {
 });
 
 app.post('/group/leave', async (req, res) => {
-    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
     const { groupId } = req.body;
     try {
         const chat = await client.getChatById(groupId);
@@ -657,7 +682,7 @@ app.post('/group/leave', async (req, res) => {
 // ─── Phase 13: Status ──────────────────────────────────────────────
 
 app.get('/status/list', async (req, res) => {
-    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
     try {
         const contacts = await client.getContacts();
         const myContacts = contacts.filter(c => c.isMyContact && c.id && c.id.server === 'c.us').slice(0, 40);
@@ -685,7 +710,7 @@ app.get('/status/list', async (req, res) => {
 });
 
 app.post('/status/post', async (req, res) => {
-    if (clientStatus !== 'connected' || !client) return res.status(400).json({ success: false, error: 'Not connected' });
+    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
     const { text, mediaBase64, mediaType, caption } = req.body;
     try {
         if (mediaBase64 && mediaType) {
@@ -705,7 +730,7 @@ app.post('/status/post', async (req, res) => {
 // GET /profile-pic?phone=+91xxxxx — returns WhatsApp profile picture URL
 app.get('/profile-pic', async (req, res) => {
     const { phone } = req.query;
-    if (!phone || clientStatus !== 'connected' || !client) {
+    if (!phone || !isClientReady()) {
         return res.json({ success: false, url: null });
     }
     try {
@@ -726,7 +751,7 @@ app.get('/profile-pic', async (req, res) => {
 
 // GET /my-profile — returns the connected account's own WhatsApp profile
 app.get('/my-profile', async (req, res) => {
-    if (clientStatus !== 'connected' || !client) {
+    if (!isClientReady()) {
         return res.status(400).json({ success: false, error: 'Not connected' });
     }
     try {
@@ -755,7 +780,7 @@ app.get('/my-profile', async (req, res) => {
 
 // GET /sync-messages — full chat history for all chats (used on login to backfill DB)
 app.get('/sync-messages', async (req, res) => {
-    if (clientStatus !== 'connected' || !client) {
+    if (!isClientReady()) {
         return res.json({ success: false, chats: [], error: 'Not connected' });
     }
     const msgLimit = parseInt(req.query.msgLimit) || 50;   // messages per chat
@@ -807,6 +832,7 @@ app.get('/sync-messages', async (req, res) => {
         }
         res.json({ success: true, chats: result });
     } catch (e) {
+        handleClientCrash(e);
         console.error('sync-messages error:', e.message);
         res.json({ success: false, chats: [], error: e.message });
     }
@@ -814,7 +840,7 @@ app.get('/sync-messages', async (req, res) => {
 
 // GET /recent-messages — returns recent inbound messages across all chats
 app.get('/recent-messages', async (req, res) => {
-    if (clientStatus !== 'connected' || !client) {
+    if (!isClientReady()) {
         return res.json({ success: false, messages: [] });
     }
     try {
