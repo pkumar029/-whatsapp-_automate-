@@ -34,17 +34,24 @@ def get_messages(
 
     query = db.query(Message)
 
-    # Strict per-account filter
-    if wa_account:
-        query = query.filter(Message.wa_account == wa_account)
+    if contact_id:
+        query = query.filter(Message.contact_id == contact_id)
+        # Include legacy messages that predate the wa_account stamp; exclude
+        # only messages that are stamped for a DIFFERENT account.
+        if wa_account:
+            query = query.filter(
+                or_(Message.wa_account == wa_account, Message.wa_account == None)
+            )
+    else:
+        # Without a contact filter, enforce strict account isolation
+        if wa_account:
+            query = query.filter(Message.wa_account == wa_account)
 
     if search:
         s = f"%{search}%"
         query = query.filter(or_(Message.content.ilike(s), Message.phone.ilike(s)))
     if direction:
         query = query.filter(Message.direction == direction)
-    if contact_id:
-        query = query.filter(Message.contact_id == contact_id)
 
     total = query.count()
     messages = query.order_by(Message.created_at.desc()).offset((page - 1) * limit).limit(limit).all()

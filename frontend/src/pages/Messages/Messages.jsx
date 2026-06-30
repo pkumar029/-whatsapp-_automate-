@@ -28,6 +28,29 @@ function useIsMobile(bp = 768) {
   return v
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────
+// Returns true for valid E.164 WhatsApp numbers (7-13 digits)
+function isValidWaPhone(phone) {
+  return /^\+\d{7,13}$/.test(phone || '')
+}
+
+// Subtitle for the chat header / contact info panel
+// - Saved contacts: show nothing (name is enough)
+// - Unsaved contacts with valid phone: show the phone
+// - Groups / Teams: "Group chat" / "Broadcast list"
+// - Invalid phones: hide entirely
+function contactSubtitle(contact) {
+  if (!contact) return ''
+  if (contact.tags?.includes('Group')) return 'Group chat'
+  if (contact.tags?.includes('Team')) return 'Broadcast list'
+  const phone = contact.phone || ''
+  if (!isValidWaPhone(phone)) return ''
+  // Saved (address-book) contacts: name already tells us who it is
+  if (contact.is_my_contact) return ''
+  // Unsaved contact: show the number as secondary info
+  return phone
+}
+
 // ─── Constants ──────────────────────────────────────────────────
 const AVATAR_COLORS = [
   '#25D366','#00BCD4','#9C27B0','#FF5722','#3F51B5',
@@ -532,9 +555,11 @@ function ContactInfoPanel({ contact, messages, starredMsgs, profilePics, onClose
             {isGroup && <button onClick={() => setEditGroupName(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8696a0', display: 'flex', padding: 2 }}><Pencil size={14} /></button>}
           </div>
         )}
-        <div style={{ fontSize: 13, color: '#8696a0', textAlign: 'center' }}>
-          {isGroup ? 'Group' : isTeam ? 'Broadcast list' : contact.phone}
-        </div>
+        {contactSubtitle(contact) && (
+          <div style={{ fontSize: 13, color: '#8696a0', textAlign: 'center' }}>
+            {contactSubtitle(contact)}
+          </div>
+        )}
         {blocked && (
           <div style={{ marginTop: 8, fontSize: 11, color: '#ff4d4f', background: 'rgba(255,77,79,0.1)', padding: '3px 10px', borderRadius: 10 }}>
             Blocked
@@ -1806,11 +1831,11 @@ export default function Messages() {
                   <Avatar contact={selectedContact} size={38} fontSize={15} profilePics={profilePics} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, color: '#e9edef', fontSize: 15 }}>{selectedContact.name}</div>
-                    <div style={{ fontSize: 12, color: '#8696a0' }}>
-                      {selectedContact.tags?.includes('Group') ? 'Group chat' :
-                       selectedContact.tags?.includes('Team') ? 'Broadcast list' :
-                       selectedContact.phone}
-                    </div>
+                    {contactSubtitle(selectedContact) && (
+                      <div style={{ fontSize: 12, color: '#8696a0' }}>
+                        {contactSubtitle(selectedContact)}
+                      </div>
+                    )}
                   </div>
                 </button>
                 <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>

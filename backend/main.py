@@ -78,6 +78,15 @@ async def lifespan(app: FastAPI):
          "UPDATE contacts SET is_my_contact = 1 WHERE is_valid = 1 AND is_active = 1"),
         ("contacts is_my_contact index",
          "ALTER TABLE contacts ADD INDEX idx_contact_my_contact (is_my_contact)"),
+        ("contacts restore valid unsaved",
+         # Restore contacts that had is_valid=0 set by the webhook auto-create fix
+         # but have a real name and valid phone — keep them visible in Messages.
+         "UPDATE contacts SET is_valid = 1, is_my_contact = 0 "
+         "WHERE is_valid = 0 "
+         "AND phone REGEXP '^\\\\+[0-9]{7,13}$' "
+         "AND name NOT LIKE 'WhatsApp User %' "
+         "AND name NOT REGEXP '^[0-9]{7,}$' "
+         "AND name != phone"),
         ("whatsapp_profiles table",
          "CREATE TABLE IF NOT EXISTS whatsapp_profiles ("
          "  id INT AUTO_INCREMENT PRIMARY KEY,"

@@ -54,6 +54,7 @@ class ContactResponse(BaseModel):
     tags: Optional[List[str]]
     is_active: bool
     is_blocked: bool
+    is_my_contact: bool = False
     wa_account: Optional[str] = None
     created_at: datetime
     updated_at: datetime
