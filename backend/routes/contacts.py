@@ -67,9 +67,17 @@ async def sync_contacts(db: Session = Depends(get_db)):
 
 @router.get("/export")
 async def export_contacts(db: Session = Depends(get_db)):
-    """Export all contacts as a CSV file download."""
+    """Export contacts for the active WhatsApp account as a CSV file."""
     import csv, io
-    contacts = db.query(Contact).filter(Contact.is_active == True, Contact.is_valid == True).order_by(Contact.name).all()
+    from models.models import WhatsappSession, SessionStatus
+    session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
+    wa_account = session.phone if session else None
+
+    query = db.query(Contact).filter(Contact.is_active == True, Contact.is_valid == True)
+    if wa_account:
+        query = query.filter(Contact.wa_account == wa_account)
+    contacts = query.order_by(Contact.name).all()
+
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["name", "phone", "email", "notes", "tags"])
@@ -86,8 +94,14 @@ async def export_contacts(db: Session = Depends(get_db)):
 
 @router.post("/import")
 async def import_contacts(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """Import contacts from a CSV file (columns: name, phone, email, notes, tags)."""
+    """Import contacts from a CSV file (columns: name, phone, email, notes, tags).
+    Contacts are assigned to the currently connected WhatsApp account so they
+    appear immediately in the contacts list."""
     import csv, io
+    from models.models import WhatsappSession, SessionStatus
+    session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
+    wa_account = session.phone if session else None
+
     content = await file.read()
     try:
         text = content.decode("utf-8-sig")
@@ -113,10 +127,12 @@ async def import_contacts(file: UploadFile = File(...), db: Session = Depends(ge
                 if email: existing.email = email
                 if notes: existing.notes = notes
                 if tags: existing.tags = tags
+                if wa_account: existing.wa_account = wa_account
                 db.commit()
                 updated += 1
             else:
-                c = Contact(name=name, phone=phone, email=email, notes=notes, tags=tags)
+                c = Contact(name=name, phone=phone, email=email, notes=notes,
+                            tags=tags, wa_account=wa_account)
                 db.add(c)
                 db.commit()
                 created += 1
