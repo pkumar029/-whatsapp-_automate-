@@ -116,7 +116,7 @@ async def get_whatsapp_profile(db: Session = Depends(get_db)):
     from models.models import WhatsappSession, SessionStatus as SS
     session = db.query(WhatsappSession).filter(WhatsappSession.status == SS.connected).first()
     if not session or not session.phone:
-        raise HTTPException(status_code=400, detail="No active WhatsApp session")
+        return {"success": False, "detail": "No active WhatsApp session"}
     from services.profile_service import fetch_and_save_profile
     return fetch_and_save_profile(db, session.phone)
 
