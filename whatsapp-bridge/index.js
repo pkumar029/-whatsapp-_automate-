@@ -285,7 +285,7 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
             const content = msg.body;
             const messageId = msg.id._serialized;
             
-            await fetch('http://localhost:7003/api/v1/whatsapp/webhook', {
+            await fetch('http://localhost:7005/api/v1/whatsapp/webhook', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ phone, content, name, tags, messageId })
