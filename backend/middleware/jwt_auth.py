@@ -16,6 +16,7 @@ _PUBLIC_PREFIXES = (
 _PUBLIC_EXACT = {
     "/api/v1/auth/login",
     "/api/v1/auth/register",
+    "/api/v1/auth/auto-token",            # Auto-login for single-user installations
     "/api/v1/whatsapp/status",            # AppContext polls before login
     "/api/v1/whatsapp/events",            # SSE — EventSource can't send headers
     "/api/v1/whatsapp/webhook",           # Bridge calls this internally

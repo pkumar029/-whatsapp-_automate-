@@ -11,9 +11,21 @@ export function AuthProvider({ children }) {
 
   const isAuthenticated = true
 
-  // On mount, validation is bypassed
+  // On mount: ensure a valid JWT token exists. If not, fetch one automatically.
   useEffect(() => {
-    setAuthLoading(false)
+    const token = localStorage.getItem(TOKEN_KEY)
+    if (token) {
+      setAuthLoading(false)
+      return
+    }
+    authApi.autoToken()
+      .then(res => {
+        const { access_token, user: userData } = res.data
+        localStorage.setItem(TOKEN_KEY, access_token)
+        setUser(userData)
+      })
+      .catch(() => {})
+      .finally(() => setAuthLoading(false))
   }, [])
 
   const login = useCallback(async (username, password) => {

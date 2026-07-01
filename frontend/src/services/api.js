@@ -26,15 +26,23 @@ api.interceptors.request.use(
 )
 
 // ─── Response Interceptor ────────────────────────────────────
+let _refreshing = false
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      // Clear stored credentials and redirect to auth page
-      localStorage.removeItem('wa_token')
-      localStorage.removeItem('wa_active_phone')
-      if (!window.location.pathname.startsWith('/auth')) {
-        window.location.href = '/auth'
+  async (error) => {
+    if (error.response?.status === 401 && !error.config?._retry && !_refreshing) {
+      error.config._retry = true
+      _refreshing = true
+      try {
+        const res = await api.get('/auth/auto-token')
+        const token = res.data.access_token
+        localStorage.setItem('wa_token', token)
+        error.config.headers.Authorization = `Bearer ${token}`
+        return api(error.config)
+      } catch (_) {
+        localStorage.removeItem('wa_token')
+      } finally {
+        _refreshing = false
       }
     }
     return Promise.reject(error)
@@ -156,6 +164,7 @@ export const statusApi = {
 
 // ─── Auth API ─────────────────────────────────────────────────
 export const authApi = {
+  autoToken: () => api.get('/auth/auto-token'),
   login: (data) => api.post('/auth/login', data),
   register: (data) => api.post('/auth/register', data),
   logout: () => api.post('/auth/logout'),
