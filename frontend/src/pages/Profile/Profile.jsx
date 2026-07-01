@@ -1,8 +1,8 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   User, Mail, Building2, Briefcase, Camera, Save,
-  Lock, Eye, EyeOff, CheckCircle2, AlertCircle, Phone, Shield, MessageCircle
+  Lock, Eye, EyeOff, CheckCircle2, AlertCircle, Phone, Shield, MessageCircle, RefreshCw
 } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 
@@ -71,7 +71,7 @@ function Toast({ msg, type }) {
 }
 
 export default function Profile() {
-  const { profile, updateProfile, changePassword, sessionStatus, waProfile } = useApp()
+  const { profile, updateProfile, changePassword, sessionStatus, waProfile, fetchWaProfile } = useApp()
   const navigate = useNavigate()
   const fileRef = useRef(null)
 
@@ -97,6 +97,20 @@ export default function Profile() {
   const [pwdMsg, setPwdMsg] = useState('')
   const [pwdErr, setPwdErr] = useState('')
   const [savingPwd, setSavingPwd] = useState(false)
+
+  const [refreshingWa, setRefreshingWa] = useState(false)
+
+  // Sync waProfile into avatar / name fields if user hasn't set their own values yet
+  useEffect(() => {
+    if (waProfile?.profilePicUrl && !profile.avatar) setAvatar(waProfile.profilePicUrl)
+    if (waProfile?.name && !profile.name) setName(prev => prev || waProfile.name)
+  }, [waProfile]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleRefreshWa = async () => {
+    setRefreshingWa(true)
+    await fetchWaProfile().catch(() => {})
+    setRefreshingWa(false)
+  }
 
   const initial = name ? name.charAt(0).toUpperCase() : '?'
 
@@ -148,6 +162,7 @@ export default function Profile() {
 
   return (
     <div style={{ maxWidth: 700, margin: '0 auto', paddingBottom: 40 }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
 
       {/* ── WhatsApp Profile Banner ── */}
       {waProfile && (
@@ -201,16 +216,30 @@ export default function Profile() {
             )}
           </div>
 
-          <div style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            padding: '5px 12px', borderRadius: 20, fontSize: 12, flexShrink: 0,
-            background: 'rgba(37,211,102,0.12)',
-            color: '#25D366',
-            border: '1px solid rgba(37,211,102,0.3)',
-            fontWeight: 600,
-          }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#25D366', display: 'inline-block' }} />
-            Connected
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8, flexShrink: 0 }}>
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '5px 12px', borderRadius: 20, fontSize: 12,
+              background: 'rgba(37,211,102,0.12)',
+              color: '#25D366',
+              border: '1px solid rgba(37,211,102,0.3)',
+              fontWeight: 600,
+            }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#25D366', display: 'inline-block' }} />
+              Connected
+            </div>
+            <button
+              type="button"
+              onClick={handleRefreshWa}
+              disabled={refreshingWa}
+              title="Refresh WhatsApp profile"
+              style={{
+                background: 'none', border: 'none', cursor: refreshingWa ? 'wait' : 'pointer',
+                color: 'rgba(37,211,102,0.6)', padding: 4, display: 'flex', alignItems: 'center',
+              }}
+            >
+              <RefreshCw size={13} style={refreshingWa ? { animation: 'spin 1s linear infinite' } : {}} />
+            </button>
           </div>
         </div>
       )}

@@ -1,7 +1,8 @@
 """
 Dashboard Routes — Summary statistics
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
+from typing import Optional
 from sqlalchemy.orm import Session
 from database.connection import get_db
 from services import contacts_service, messages_service, automations_service
@@ -13,20 +14,37 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 
 @router.get("/summary", response_model=DashboardSummary)
-async def get_summary(db: Session = Depends(get_db)):
-    """Get dashboard summary statistics."""
-    from models.models import WhatsappSession, SessionStatus
-    session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
-    wa_account = session.phone if session else None
+async def get_summary(
+    wa_account: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Get dashboard summary statistics, scoped to the given WhatsApp account."""
+    if not wa_account:
+        from models.models import WhatsappSession, SessionStatus
+        session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
+        wa_account = session.phone if session else None
 
     total_contacts = contacts_service.get_total_contacts(db, wa_account)
     sent_messages = messages_service.get_sent_count(db, wa_account)
+    received_messages = messages_service.get_received_count(db, wa_account)
     failed_messages = messages_service.get_failed_count(db, wa_account)
-    active_automations = automations_service.get_active_automations_count(db)
+    active_automations = automations_service.get_active_automations_count(db, wa_account)
     
-    # Active campaigns and queued message jobs
-    active_campaigns = db.query(func.count(Campaign.id)).filter(Campaign.status == CampaignStatus.active).scalar() or 0
-    queued_jobs = db.query(func.count(MessageJob.id)).filter(MessageJob.status == JobStatus.queued).scalar() or 0
+    # Active campaigns and queued message jobs — scoped to the connected account
+    campaign_q = db.query(func.count(Campaign.id)).filter(Campaign.status == CampaignStatus.active)
+    if wa_account:
+        campaign_q = campaign_q.filter(Campaign.wa_account == wa_account)
+    active_campaigns = campaign_q.scalar() or 0
+
+    # Queued jobs: join to campaigns so we can scope by wa_account
+    jobs_q = db.query(func.count(MessageJob.id)).join(
+        Campaign, MessageJob.campaign_id == Campaign.id, isouter=True
+    ).filter(MessageJob.status == JobStatus.queued)
+    if wa_account:
+        jobs_q = jobs_q.filter(
+            (Campaign.wa_account == wa_account) | Campaign.id.is_(None)
+        )
+    queued_jobs = jobs_q.scalar() or 0
 
     # Recent activity from logs
     recent_logs = db.query(AutomationLog).order_by(
@@ -58,6 +76,7 @@ async def get_summary(db: Session = Depends(get_db)):
     return {
         "total_contacts": total_contacts,
         "sent_messages": sent_messages,
+        "received_messages": received_messages,
         "failed_messages": failed_messages,
         "active_automations": active_automations,
         "active_campaigns": active_campaigns,

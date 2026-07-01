@@ -3,7 +3,7 @@ import {
   Send, Plus, Calendar, Clock, Play, Pause, XCircle,
   Search, ArrowLeft, RefreshCw, CheckCircle, AlertTriangle,
   Eye, Check, ShieldAlert, Sliders, FileText, Sparkles, X, WifiOff,
-  Users
+  Users, Pencil, Trash2
 } from 'lucide-react'
 import { campaignsApi, contactsApi } from '../../services/api'
 import { useApp } from '../../context/AppContext'
@@ -144,6 +144,14 @@ export default function Campaigns() {
   // Drawer / Modal states
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedCampaign, setSelectedCampaign] = useState(null)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editingCampaign, setEditingCampaign] = useState(null)
+
+  // Edit form states
+  const [editName, setEditName] = useState('')
+  const [editDelay, setEditDelay] = useState(5)
+  const [editConcurrency, setEditConcurrency] = useState(1)
+  const [editTemplate, setEditTemplate] = useState('')
   
   // Create campaign form states
   const [name, setName] = useState('')
@@ -175,7 +183,8 @@ export default function Campaigns() {
   const fetchCampaigns = useCallback(async () => {
     setLoadingCampaigns(true)
     try {
-      const res = await campaignsApi.getAll({ page, limit: 10 })
+      const waAccount = sessionStatus?.phone || localStorage.getItem('wa_active_phone') || undefined
+      const res = await campaignsApi.getAll({ page, limit: 10, wa_account: waAccount })
       setCampaigns(res.data?.campaigns || [])
       setTotalCampaigns(res.data?.total || 0)
     } catch (err) {
@@ -317,6 +326,43 @@ export default function Campaigns() {
       fetchCampaigns()
     } catch (err) {
       alert('Failed to cancel campaign')
+    }
+  }
+
+  const handleOpenEditModal = (campaign) => {
+    setEditingCampaign(campaign)
+    setEditName(campaign.name)
+    setEditDelay(campaign.delay_seconds)
+    setEditConcurrency(campaign.concurrency)
+    setEditTemplate('')
+    setShowEditModal(true)
+  }
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault()
+    const payload = {
+      name: editName,
+      delay_seconds: parseInt(editDelay),
+      concurrency: parseInt(editConcurrency),
+    }
+    if (editTemplate.trim()) payload.template = editTemplate.trim()
+    try {
+      await campaignsApi.update(editingCampaign.id, payload)
+      setShowEditModal(false)
+      setEditingCampaign(null)
+      fetchCampaigns()
+    } catch (err) {
+      alert(getErrorMessage(err, 'Failed to update campaign.'))
+    }
+  }
+
+  const handleDelete = async (id) => {
+    if (!confirm('Delete this campaign and all its message jobs? This cannot be undone.')) return
+    try {
+      await campaignsApi.delete(id)
+      fetchCampaigns()
+    } catch (err) {
+      alert(getErrorMessage(err, 'Failed to delete campaign.'))
     }
   }
 
@@ -535,6 +581,24 @@ export default function Campaigns() {
                           <button className="btn btn-secondary btn-sm" onClick={() => handleOpenInspector(c)} title="Inspect Jobs">
                             <Eye size={14} /> Inspect Queue
                           </button>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => handleOpenEditModal(c)}
+                            disabled={c.status === 'active'}
+                            title={c.status === 'active' ? 'Pause campaign before editing' : 'Edit Campaign'}
+                          >
+                            <Pencil size={14} /> Edit
+                          </button>
+                          {(c.status === 'completed' || c.status === 'cancelled') && (
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              style={{ color: 'var(--accent-rose)' }}
+                              onClick={() => handleDelete(c.id)}
+                              title="Delete Campaign"
+                            >
+                              <Trash2 size={14} /> Delete
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1016,6 +1080,90 @@ export default function Campaigns() {
                   disabled={!name || !template.trim() || selectedContactIds.length === 0}
                 >
                   <Send size={14} /> Schedule Campaign ({selectedContactIds.length})
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ─── EDIT CAMPAIGN MODAL ─── */}
+      {showEditModal && editingCampaign && (
+        <div className="modal-overlay">
+          <div className="modal" style={{ maxWidth: 520, width: '90%' }}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Pencil size={18} color="var(--accent-primary)" />
+                Edit Campaign
+              </h3>
+              <button className="btn btn-ghost btn-icon" onClick={() => setShowEditModal(false)}><X size={18} /></button>
+            </div>
+
+            <form onSubmit={handleEditSubmit}>
+              <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div className="form-group">
+                  <label className="form-label">Campaign Name *</label>
+                  <input
+                    className="form-input"
+                    value={editName}
+                    onChange={e => setEditName(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <Clock size={12} /> Delay Seconds
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      className="form-input"
+                      value={editDelay}
+                      onChange={e => setEditDelay(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <Sliders size={12} /> Concurrency
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      className="form-input"
+                      value={editConcurrency}
+                      onChange={e => setEditConcurrency(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">
+                    New Message Body
+                    <span style={{ fontWeight: 400, color: 'var(--text-muted)', marginLeft: 6 }}>(leave blank to keep existing)</span>
+                  </label>
+                  <textarea
+                    className="form-input"
+                    placeholder="Replaces message body on all remaining queued jobs…"
+                    value={editTemplate}
+                    onChange={e => setEditTemplate(e.target.value)}
+                    rows={5}
+                    style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 }}
+                  />
+                </div>
+
+                <p style={{ margin: 0, fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>
+                  Changes to delay and concurrency affect future job scheduling. A new message body replaces text on all still-queued messages.
+                </p>
+              </div>
+
+              <div className="modal-footer" style={{ padding: '12px 20px', borderTop: '1px solid var(--border-primary)', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowEditModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={!editName.trim()}>
+                  <Pencil size={14} /> Save Changes
                 </button>
               </div>
             </form>

@@ -47,17 +47,17 @@ class ContactUpdate(BaseModel):
 
 class ContactResponse(BaseModel):
     id: int
-    name: str
+    name: Optional[str] = None
     phone: str
-    email: Optional[str]
-    notes: Optional[str]
-    tags: Optional[List[str]]
-    is_active: bool
-    is_blocked: bool
+    email: Optional[str] = None
+    notes: Optional[str] = None
+    tags: Optional[List[str]] = None
+    is_active: bool = True
+    is_blocked: bool = False
     is_my_contact: bool = False
     wa_account: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -241,6 +241,7 @@ class WhatsAppSendRequest(BaseModel):
 class DashboardSummary(BaseModel):
     total_contacts: int
     sent_messages: int
+    received_messages: Optional[int] = 0
     failed_messages: int
     active_automations: int
     active_campaigns: Optional[int] = 0
@@ -284,6 +285,13 @@ class CampaignCreate(BaseModel):
         if not v.strip():
             raise ValueError('Template body cannot be empty')
         return v
+
+
+class CampaignUpdate(BaseModel):
+    name: Optional[str] = None
+    delay_seconds: Optional[int] = None
+    concurrency: Optional[int] = None
+    template: Optional[str] = None
 
 
 class MessageJobResponse(BaseModel):

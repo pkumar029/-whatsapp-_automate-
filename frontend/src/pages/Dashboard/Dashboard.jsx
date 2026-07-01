@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
-import { Users, MessageSquare, Zap, Wifi, WifiOff, TrendingUp, CheckCircle, XCircle, Clock, ArrowRight, Send } from 'lucide-react'
-import { dashboardApi, whatsappApi } from '../../services/api'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Users, MessageSquare, Zap, Wifi, WifiOff, TrendingUp, CheckCircle, XCircle, Clock, ArrowRight, Send, Download } from 'lucide-react'
+import { dashboardApi, BASE_URL } from '../../services/api'
 import { Link } from 'react-router-dom'
 import { formatIST } from '../../utils/date'
 import { useApp } from '../../context/AppContext'
@@ -393,25 +393,60 @@ function AnalyticsChart({ displaySummary }) {
   )
 }
 
+// ─── Elapsed time helper ─────────────────────────────────────
+function useElapsed(date) {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    if (!date) return
+    const iv = setInterval(() => tick(v => v + 1), 10000)
+    return () => clearInterval(iv)
+  }, [date])
+  if (!date) return null
+  const secs = Math.round((Date.now() - date.getTime()) / 1000)
+  if (secs < 60) return `${secs}s ago`
+  return `${Math.round(secs / 60)}m ago`
+}
+
 // ─── Main Dashboard Page ──────────────────────────────────────
 export default function Dashboard() {
-  const { profile, sessionStatus } = useApp()
+  const { profile, sessionStatus, waProfile } = useApp()
   const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [lastUpdated, setLastUpdated] = useState(null)
+  const fetchingRef = useRef(false)
+  const updatedLabel = useElapsed(lastUpdated)
 
+  const fetchData = useCallback(async () => {
+    if (fetchingRef.current) return
+    fetchingRef.current = true
+    try {
+      const waAccount = localStorage.getItem('wa_active_phone') || undefined
+      const summaryRes = await dashboardApi.getSummary(waAccount ? { wa_account: waAccount } : undefined)
+      setSummary(summaryRes.data)
+      setLastUpdated(new Date())
+    } catch {}
+    finally { fetchingRef.current = false; setLoading(false) }
+  }, [])
+
+  // Initial fetch + refetch on status change
+  useEffect(() => { fetchData() }, [sessionStatus.status, fetchData])
+
+  // Auto-refresh every 30s
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const summaryRes = await dashboardApi.getSummary()
-        setSummary(summaryRes.data)
-      } catch (err) {
-        console.error('Dashboard fetch error:', err)
-      } finally {
-        setLoading(false)
-      }
+    const iv = setInterval(fetchData, 30000)
+    return () => clearInterval(iv)
+  }, [fetchData])
+
+  // SSE: refresh immediately when a new inbound message arrives
+  useEffect(() => {
+    if (sessionStatus.status !== 'connected') return
+    const es = new EventSource(`${BASE_URL}/messages/stream`)
+    es.onmessage = (e) => {
+      try { if (JSON.parse(e.data).type === 'new_message') fetchData() } catch {}
     }
-    fetchData()
-  }, [sessionStatus.status])
+    es.onerror = () => {}
+    return () => es.close()
+  }, [sessionStatus.status, fetchData])
 
   const displayStatus = sessionStatus || { status: 'disconnected' }
   const isConnected = displayStatus.status === 'connected'
@@ -419,6 +454,7 @@ export default function Dashboard() {
   const displaySummary = (summary && isConnected) ? summary : {
     total_contacts: 0,
     sent_messages: 0,
+    received_messages: 0,
     failed_messages: 0,
     active_automations: 0,
     active_campaigns: 0,
@@ -451,7 +487,7 @@ export default function Dashboard() {
         background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.12) 0%, rgba(37, 211, 102, 0.05) 100%)',
         border: '1px solid rgba(255, 255, 255, 0.08)',
         borderRadius: 'var(--radius-lg)',
-        padding: '24px 28px',
+        padding: '20px 24px',
         marginBottom: 24,
         display: 'flex',
         justifyContent: 'space-between',
@@ -461,22 +497,46 @@ export default function Dashboard() {
         backdropFilter: 'blur(10px)',
         boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.2)'
       }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 800, color: '#fff', display: 'flex', alignItems: 'center', gap: 8 }}>
-            👋 Welcome back, {profile.name || 'User'}!
-          </h2>
-          <p style={{ margin: '6px 0 0 0', color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', lineHeight: 1.5 }}>
-            Here is your live WhatsApp automation platform and messaging delivery overview.
-          </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {/* WA account avatar */}
+          <div style={{
+            width: 52, height: 52, borderRadius: '50%', flexShrink: 0,
+            background: 'linear-gradient(135deg, #25D366, #128C7E)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 20, fontWeight: 700, color: '#fff', overflow: 'hidden',
+            border: '2px solid rgba(37,211,102,0.4)',
+            boxShadow: '0 0 12px rgba(37,211,102,0.3)',
+          }}>
+            {waProfile?.profilePicUrl
+              ? <img src={waProfile.profilePicUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none' }} />
+              : (waProfile?.name?.[0]?.toUpperCase() || profile.name?.[0]?.toUpperCase() || 'W')}
+          </div>
+          <div>
+            <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 800, color: '#fff' }}>
+              Welcome back, {waProfile?.name || profile.name || 'User'}!
+            </h2>
+            {waProfile?.phone && (
+              <div style={{ margin: '2px 0 0 0', color: 'var(--accent-primary)', fontSize: 'var(--font-size-xs)', fontFamily: 'monospace', fontWeight: 600 }}>
+                {waProfile.phone}
+              </div>
+            )}
+            <p style={{ margin: '4px 0 0 0', color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', lineHeight: 1.4 }}>
+              Live WhatsApp automation &amp; messaging overview
+            </p>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <span className="badge badge-green" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', fontSize: 12 }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff', display: 'inline-block' }} />
-            System Active
-          </span>
-          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)', display: 'flex', alignItems: 'center' }}>
-            IST: {new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', month: 'short', day: 'numeric' })}
-          </span>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <span className={`badge ${isConnected ? 'badge-green' : 'badge-red'}`} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', fontSize: 11 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff', display: 'inline-block', animation: isConnected ? 'pulse 2s infinite' : 'none' }} />
+              {isConnected ? 'Live' : 'Offline'}
+            </span>
+          </div>
+          {updatedLabel && (
+            <span style={{ color: 'var(--text-muted)', fontSize: 10, opacity: 0.7 }}>
+              Updated {updatedLabel}
+            </span>
+          )}
         </div>
       </div>
 
@@ -496,6 +556,14 @@ export default function Dashboard() {
           icon={MessageSquare}
           color="green"
           badge="+8%"
+          badgeType="up"
+        />
+        <StatCard
+          title="Messages Received"
+          value={displaySummary.received_messages?.toLocaleString()}
+          icon={Download}
+          color="indigo"
+          badge="Inbox"
           badgeType="up"
         />
         <StatCard
@@ -520,14 +588,6 @@ export default function Dashboard() {
           icon={Send}
           color="amber"
           badge="Live"
-          badgeType="up"
-        />
-        <StatCard
-          title="Queued Jobs"
-          value={displaySummary.queued_jobs?.toLocaleString()}
-          icon={Clock}
-          color="indigo"
-          badge="Pending"
           badgeType="up"
         />
       </div>

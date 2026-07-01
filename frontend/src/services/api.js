@@ -1,7 +1,7 @@
 // API Service — WhatsApp Automate Frontend
 import axios from 'axios'
 
-export const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:7001/api/v1'
+export const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7005/api/v1'
 const ORIGIN_URL = BASE_URL.replace(/\/api\/v1\/?$/, '')
 
 // ─── Axios Instance ─────────────────────────────────────────
@@ -28,7 +28,17 @@ api.interceptors.request.use(
 // ─── Response Interceptor ────────────────────────────────────
 api.interceptors.response.use(
   (response) => response,
-  (error) => Promise.reject(error)
+  (error) => {
+    if (error.response?.status === 401) {
+      // Clear stored credentials and redirect to auth page
+      localStorage.removeItem('wa_token')
+      localStorage.removeItem('wa_active_phone')
+      if (!window.location.pathname.startsWith('/auth')) {
+        window.location.href = '/auth'
+      }
+    }
+    return Promise.reject(error)
+  }
 )
 
 // ─── WhatsApp API ─────────────────────────────────────────────
@@ -40,6 +50,8 @@ export const whatsappApi = {
   sendMessage: (data) => api.post('/whatsapp/send', data),
   getQR: () => api.get('/whatsapp/qr'),
   getProfile: () => api.get('/whatsapp/profile'),
+  // URL for EventSource — not an axios call
+  eventsUrl: () => `${BASE_URL}/whatsapp/events`,
 }
 
 // ─── Contacts API ─────────────────────────────────────────────
@@ -51,6 +63,7 @@ export const contactsApi = {
   delete: (id) => api.delete(`/contacts/${id}`),
   search: (query) => api.get('/contacts/search', { params: { q: query } }),
   sync: () => api.post('/contacts/sync'),
+  syncProgressUrl: () => `${BASE_URL}/contacts/sync-progress`,
   getChats: () => api.get('/contacts/chats'),
   getGroupMembers: (id) => api.get(`/contacts/${id}/group-members`),
   getProfilePic: (id) => api.get(`/contacts/${id}/profile-pic`),
@@ -115,6 +128,8 @@ export const campaignsApi = {
   pause: (id) => api.post(`/campaigns/${id}/pause`),
   resume: (id) => api.post(`/campaigns/${id}/resume`),
   cancel: (id) => api.post(`/campaigns/${id}/cancel`),
+  update: (id, data) => api.put(`/campaigns/${id}`, data),
+  delete: (id) => api.delete(`/campaigns/${id}`),
   getJobs: (id, params) => api.get(`/campaigns/${id}/jobs`, { params }),
   cancelJob: (campaignId, jobId) => api.post(`/campaigns/${campaignId}/jobs/${jobId}/cancel`),
   retryJob: (campaignId, jobId) => api.post(`/campaigns/${campaignId}/jobs/${jobId}/retry`),
@@ -142,6 +157,8 @@ export const statusApi = {
 // ─── Auth API ─────────────────────────────────────────────────
 export const authApi = {
   login: (data) => api.post('/auth/login', data),
+  register: (data) => api.post('/auth/register', data),
+  logout: () => api.post('/auth/logout'),
   me: () => api.get('/auth/me'),
   updateMe: (data) => api.put('/auth/me', data),
   changePassword: (data) => api.post('/auth/change-password', data),
@@ -157,7 +174,7 @@ export const aiApi = {
 
 // ─── Dashboard Summary ────────────────────────────────────────
 export const dashboardApi = {
-  getSummary: () => api.get('/dashboard/summary'),
+  getSummary: (params) => api.get('/dashboard/summary', { params }),
 }
 
 export default api

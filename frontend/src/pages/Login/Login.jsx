@@ -30,7 +30,7 @@ const CONNECTION_METHODS = [
 ]
 
 export default function Login() {
-  const { sessionStatus, refreshSessionStatus } = useApp()
+  const { sessionStatus, refreshSessionStatus, markConnectionInitiated, fetchWaProfile } = useApp()
   const navigate = useNavigate()
 
   // View: 'splash' | 'method' | 'form' | 'connecting'
@@ -49,6 +49,7 @@ export default function Login() {
   const [message, setMessage] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
   const [backendOk, setBackendOk] = useState(null) // null=checking, true, false
+  const [connectionStep, setConnectionStep] = useState('launching') // launching | qr | authenticated | connected
   const failCountRef = useRef(0)
 
   // True while view === 'connecting'; read in unmount cleanup (can't use state there)
@@ -119,23 +120,73 @@ export default function Login() {
     return () => { cancelled = true; clearTimeout(t); clearInterval(iv) }
   }, [])
 
-  // Poll status only while the QR/pairing view is visible — prevents ghost polling when
-  // the user returns to splash after pressing Back from the connecting screen
+  // SSE listener while QR/pairing view is visible — replaces the old 2 s polling interval.
+  // Falls back to 1.5 s polling if the SSE connection can't be established.
   useEffect(() => {
     if (view !== 'connecting') return
-    const interval = setInterval(() => {
-      refreshSessionStatus().then(data => {
-        if (data?.status === 'connected') {
-          didConnectRef.current = true
-          navigate('/dashboard')
-          return
+
+    let es = null
+    let fallbackTimer = null
+    let cancelled = false
+
+    const onConnected = () => {
+      if (didConnectRef.current || cancelled) return
+      didConnectRef.current = true
+      if (es) { try { es.close() } catch (_) {} ; es = null }
+      clearTimeout(fallbackTimer)
+      setConnectionStep('connected')
+      // Start profile fetch immediately (parallel to status refresh)
+      fetchWaProfile()
+      refreshSessionStatus().then(() => navigate('/dashboard'))
+    }
+
+    const startFallback = () => {
+      if (fallbackTimer || cancelled) return
+      const poll = () => {
+        refreshSessionStatus().then(data => {
+          if (cancelled) return
+          if (data?.qr) { setQrCode(data.qr); setConnectionStep(s => s === 'launching' ? 'qr' : s) }
+          if (data?.pairing_code) { setPairingCode(data.pairing_code); setConnectionStep(s => s === 'launching' ? 'qr' : s) }
+          if (data?.status === 'connected') { onConnected(); return }
+          if (!cancelled) fallbackTimer = setTimeout(poll, 1500)
+        }).catch(() => { if (!cancelled) fallbackTimer = setTimeout(poll, 1500) })
+      }
+      fallbackTimer = setTimeout(poll, 1500)
+    }
+
+    es = new EventSource(whatsappApi.eventsUrl())
+
+    es.onmessage = (evt) => {
+      if (cancelled) return
+      try {
+        const data = JSON.parse(evt.data)
+        const bs = data.bridge_status || data.status
+
+        if (data.qr || data.pairing_code) {
+          if (data.qr) setQrCode(data.qr)
+          if (data.pairing_code) setPairingCode(data.pairing_code)
+          setConnectionStep(s => s === 'launching' ? 'qr' : s)
         }
-        setQrCode(data?.qr || null)
-        setPairingCode(data?.pairing_code || null)
-      }).catch(() => {})
-    }, 2000)
-    return () => clearInterval(interval)
-  }, [view, refreshSessionStatus, navigate])
+        if (data.type === 'authenticated') setConnectionStep('authenticated')
+        if (bs === 'connected' || data.type === 'connected') onConnected()
+        if ((data.type === 'disconnected' || data.type === 'error') && !didConnectRef.current) {
+          setErrorMsg(data.message || data.reason || 'Connection failed — please try again.')
+          setView('method')
+        }
+      } catch (_) {}
+    }
+
+    es.onerror = () => {
+      if (es) { try { es.close() } catch (_) {} ; es = null }
+      startFallback()
+    }
+
+    return () => {
+      cancelled = true
+      if (es) { try { es.close() } catch (_) {} }
+      clearTimeout(fallbackTimer)
+    }
+  }, [view]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSelectMethod = (id) => {
     setConnectionType(id)
@@ -151,6 +202,10 @@ export default function Login() {
     setErrorMsg('')
     setQrCode(null)
     setPairingCode(null)
+    setConnectionStep('launching')
+    // Tell AppContext that THIS browser is initiating a new connection so it can
+    // lock wa_active_phone to the resulting account (browser-session isolation).
+    markConnectionInitiated()
 
     const config = {
       connection_type: connectionType,
@@ -413,66 +468,95 @@ export default function Login() {
       )}
 
       {/* ── CONNECTING / QR / PAIRING CODE VIEW ── */}
-      {view === 'connecting' && (
-        <div className="portal-card" style={{ alignItems: 'center', gap: 20 }}>
-          {message && (
-            <div style={{ background: 'var(--accent-primary-muted)', border: '1px solid rgba(37,211,102,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 12px', fontSize: 'var(--font-size-xs)', color: 'var(--accent-primary)', width: '100%' }}>
-              {message}
-            </div>
-          )}
-          {errorMsg && (
-            <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 12px', fontSize: 'var(--font-size-xs)', color: 'var(--accent-rose)', width: '100%' }}>
-              {errorMsg}
-            </div>
-          )}
+      {view === 'connecting' && (() => {
+        const stepOrder = ['launching', 'qr', 'authenticated', 'connected']
+        const stepIdx = stepOrder.indexOf(connectionStep)
+        const isDone = (s) => stepOrder.indexOf(s) < stepIdx
+        const isActive = (s) => s === connectionStep
 
-          {pairingCode || sessionStatus.pairing_code ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, width: '100%' }}>
-              <div style={{ fontSize: 32, fontWeight: 800, color: 'var(--accent-primary)', letterSpacing: 4, background: 'var(--bg-secondary)', padding: '12px 24px', borderRadius: 'var(--radius-md)', border: '1px dashed var(--accent-primary)', fontFamily: 'monospace', textAlign: 'center' }}>
-                {pairingCode || sessionStatus.pairing_code}
-              </div>
-              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)', textAlign: 'left', lineHeight: 1.6, background: 'rgba(255,255,255,0.02)', padding: 12, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-primary)', width: '100%' }}>
-                <strong>How to use pairing code:</strong>
-                <ol style={{ margin: '6px 0 0 16px', padding: 0 }}>
-                  <li>Open WhatsApp on your phone</li>
-                  <li>Settings &rarr; Linked Devices &rarr; Link a Device</li>
-                  <li>Tap <strong>Link with phone number instead</strong></li>
-                  <li>Enter the 8-character code shown above</li>
-                </ol>
-              </div>
-            </div>
-          ) : qrCode || sessionStatus.qr ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
-              <div style={{ background: '#fff', padding: 12, borderRadius: 'var(--radius-md)', width: 200, height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
-                <img src={`data:image/png;base64,${qrCode || sessionStatus.qr}`} alt="WhatsApp QR Code" style={{ width: '100%', height: '100%' }} />
-              </div>
-              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)', textAlign: 'center', lineHeight: 1.5 }}>
-                Open WhatsApp &rarr; <strong>Linked Devices</strong> &rarr; scan the QR code above.
-              </div>
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '20px 0' }}>
-              <RefreshCw size={36} color="var(--accent-primary)" style={{ margin: '0 auto 12px', animation: 'spin 1.5s linear infinite' }} />
-              <p style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>
-                Initializing session... Please wait.
+        return (
+          <div className="portal-card" style={{ alignItems: 'center', gap: 20 }}>
+            {/* Header */}
+            <div style={{ textAlign: 'center', width: '100%' }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700, color: '#fff', margin: '0 0 4px' }}>Connecting WhatsApp</h2>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+                {connectionStep === 'launching' && 'Starting browser, please wait…'}
+                {connectionStep === 'qr' && (pairingCode ? 'Enter pairing code in WhatsApp' : 'Scan the QR code with your phone')}
+                {connectionStep === 'authenticated' && 'QR scanned — finishing authorization…'}
+                {connectionStep === 'connected' && 'Connected! Opening Dashboard…'}
               </p>
             </div>
-          )}
 
-          <button
-            className="btn btn-secondary"
-            onClick={handleCancel}
-            disabled={connecting}
-            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-          >
-            {connecting ? (
-              <><RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> Cancelling...</>
-            ) : (
-              'Cancel & Start Over'
+            {/* Progress Steps */}
+            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {[
+                { id: 'launching',     label: 'Launching browser' },
+                { id: 'qr',           label: pairingCode ? 'Pairing code ready' : 'QR Code ready' },
+                { id: 'authenticated', label: 'Device authorized' },
+                { id: 'connected',     label: 'Opening Dashboard' },
+              ].map(step => (
+                <div key={step.id} className={`conn-step ${isDone(step.id) ? 'done' : isActive(step.id) ? 'active' : 'pending'}`}>
+                  <div className="conn-step-icon">
+                    {isDone(step.id)
+                      ? <span style={{ fontSize: 11 }}>✓</span>
+                      : isActive(step.id)
+                        ? <RefreshCw size={11} style={{ animation: 'spin 1.2s linear infinite' }} />
+                        : <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'rgba(255,255,255,0.12)', display: 'block' }} />}
+                  </div>
+                  <span className="conn-step-label">{step.label}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* QR Code */}
+            {(qrCode || sessionStatus.qr) && (connectionStep === 'qr') && !pairingCode && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                <div style={{ background: '#fff', padding: 10, borderRadius: 'var(--radius-md)', width: 196, height: 196, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
+                  <img src={`data:image/png;base64,${qrCode || sessionStatus.qr}`} alt="WhatsApp QR Code" style={{ width: '100%', height: '100%' }} />
+                </div>
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', margin: 0 }}>
+                  Open WhatsApp &rarr; <strong style={{ color: 'var(--text-secondary)' }}>Linked Devices</strong> &rarr; scan
+                </p>
+              </div>
             )}
-          </button>
-        </div>
-      )}
+
+            {/* Pairing Code */}
+            {(pairingCode || sessionStatus.pairing_code) && connectionStep === 'qr' && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, width: '100%' }}>
+                <div style={{ fontSize: 32, fontWeight: 800, color: 'var(--accent-primary)', letterSpacing: 4, background: 'var(--bg-secondary)', padding: '12px 24px', borderRadius: 'var(--radius-md)', border: '1px dashed var(--accent-primary)', fontFamily: 'monospace', textAlign: 'center' }}>
+                  {pairingCode || sessionStatus.pairing_code}
+                </div>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)', textAlign: 'left', lineHeight: 1.6, background: 'rgba(255,255,255,0.02)', padding: 12, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-primary)', width: '100%' }}>
+                  <strong>How to use pairing code:</strong>
+                  <ol style={{ margin: '6px 0 0 16px', padding: 0 }}>
+                    <li>Open WhatsApp on your phone</li>
+                    <li>Settings &rarr; Linked Devices &rarr; Link a Device</li>
+                    <li>Tap <strong>Link with phone number instead</strong></li>
+                    <li>Enter the 8-character code shown above</li>
+                  </ol>
+                </div>
+              </div>
+            )}
+
+            {errorMsg && (
+              <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 12px', fontSize: 'var(--font-size-xs)', color: 'var(--accent-rose)', width: '100%' }}>
+                {errorMsg}
+              </div>
+            )}
+
+            <button
+              className="btn btn-secondary"
+              onClick={handleCancel}
+              disabled={connecting}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+            >
+              {connecting
+                ? <><RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> Cancelling…</>
+                : 'Cancel & Start Over'}
+            </button>
+          </div>
+        )
+      })()}
 
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
@@ -531,6 +615,20 @@ export default function Login() {
         .link-method-card.active .link-method-radio { border-color: var(--accent-primary); }
         .link-method-radio-inner { width: 10px; height: 10px; border-radius: 50%; background: transparent; }
         .link-method-card.active .link-method-radio-inner { background: var(--accent-primary); }
+
+        /* Connection progress steps */
+        .conn-step { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: var(--radius-sm); border: 1px solid transparent; transition: all 0.2s; }
+        .conn-step.done   { border-color: rgba(37,211,102,0.2); background: rgba(37,211,102,0.05); }
+        .conn-step.active { border-color: rgba(37,211,102,0.4); background: rgba(37,211,102,0.1); }
+        .conn-step.pending { border-color: rgba(255,255,255,0.05); background: rgba(255,255,255,0.02); }
+        .conn-step-icon { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .conn-step.done   .conn-step-icon { background: var(--accent-primary); color: #000; }
+        .conn-step.active .conn-step-icon { background: rgba(37,211,102,0.2); color: var(--accent-primary); }
+        .conn-step.pending .conn-step-icon { background: rgba(255,255,255,0.05); color: transparent; }
+        .conn-step-label { font-size: 13px; font-weight: 500; }
+        .conn-step.done   .conn-step-label { color: var(--accent-primary); }
+        .conn-step.active .conn-step-label { color: #fff; }
+        .conn-step.pending .conn-step-label { color: var(--text-muted); }
 
       `}</style>
     </div>

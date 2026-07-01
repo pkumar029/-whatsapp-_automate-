@@ -21,7 +21,7 @@ const BOTTOM_ITEMS = [
 ]
 
 export default function Sidebar({ isOpen, isCollapsed, onClose }) {
-  const { sessionStatus } = useApp()
+  const { sessionStatus, waProfile } = useApp()
 
   return (
     <aside className={`sidebar${isOpen ? ' sidebar-open' : ''}${isCollapsed ? ' sidebar-collapsed' : ''}`}>
@@ -67,6 +67,30 @@ export default function Sidebar({ isOpen, isCollapsed, onClose }) {
               <span className="nav-item-hint">{hint}</span>
             </NavLink>
           ))}
+
+          {/* Connected account shortcut — profile pic + name */}
+          {sessionStatus?.status === 'connected' && (
+            <NavLink
+              to="/profile"
+              onClick={() => onClose && onClose()}
+              title={waProfile?.name ? `${waProfile.name} — view profile` : 'View profile'}
+              className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+            >
+              <div style={{
+                width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+                background: 'linear-gradient(135deg, #25D366, #128C7E)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 9, fontWeight: 700, color: '#fff', overflow: 'hidden',
+              }}>
+                {waProfile?.profilePicUrl
+                  ? <img src={waProfile.profilePicUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none' }} />
+                  : (waProfile?.name?.[0]?.toUpperCase() || 'W')}
+              </div>
+              <span className="nav-item-label" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {waProfile?.name || 'My Account'}
+              </span>
+            </NavLink>
+          )}
 
           {/* Connection indicator dot */}
           <div className="sidebar-conn-dot" title={`WhatsApp: ${sessionStatus?.status || 'disconnected'}`}>

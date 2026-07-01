@@ -8,18 +8,26 @@ from sqlalchemy.orm import Session
 from database.connection import get_db
 from models.models import Campaign, MessageJob, CampaignStatus, JobStatus, Contact
 from models.schemas import (
-    CampaignCreate, CampaignResponse, CampaignListResponse, JobListResponse
+    CampaignCreate, CampaignUpdate, CampaignResponse, CampaignListResponse, JobListResponse
 )
 from services import queue_service
 
 router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
 
 
+def _active_wa_account(db: Session) -> Optional[str]:
+    """Return the phone of the currently connected WhatsApp session, or None."""
+    from models.models import WhatsappSession, SessionStatus as SS
+    session = db.query(WhatsappSession).filter(WhatsappSession.status == SS.connected).first()
+    return session.phone if session else None
+
+
 @router.post("", response_model=CampaignResponse, status_code=201)
 async def create_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
     """Create a campaign and bulk schedule message jobs."""
     try:
-        return queue_service.create_campaign(db, data)
+        wa_account = _active_wa_account(db)
+        return queue_service.create_campaign(db, data, wa_account=wa_account)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -30,10 +38,15 @@ async def create_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
 async def list_campaigns(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    wa_account: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """List campaigns with pagination."""
+    """List campaigns with pagination, filtered by WhatsApp account."""
+    if not wa_account:
+        wa_account = _active_wa_account(db)
     query = db.query(Campaign)
+    if wa_account:
+        query = query.filter(Campaign.wa_account == wa_account)
     total = query.count()
     campaigns = query.order_by(Campaign.created_at.desc()).offset((page - 1) * limit).limit(limit).all()
     return {"campaigns": campaigns, "total": total}
@@ -46,6 +59,44 @@ async def get_campaign(campaign_id: int, db: Session = Depends(get_db)):
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
     return campaign
+
+
+@router.put("/{campaign_id}", response_model=CampaignResponse)
+async def update_campaign(campaign_id: int, data: CampaignUpdate, db: Session = Depends(get_db)):
+    """Edit campaign metadata. Not allowed while campaign is active."""
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign.status == CampaignStatus.active:
+        raise HTTPException(status_code=400, detail="Pause the campaign before editing it.")
+    if data.name is not None:
+        campaign.name = data.name.strip()
+    if data.delay_seconds is not None:
+        campaign.delay_seconds = data.delay_seconds
+    if data.concurrency is not None:
+        campaign.concurrency = data.concurrency
+    if data.template is not None:
+        # Propagate new message body to remaining queued jobs
+        db.query(MessageJob).filter(
+            MessageJob.campaign_id == campaign_id,
+            MessageJob.status == JobStatus.queued
+        ).update({MessageJob.body: data.template}, synchronize_session=False)
+    db.commit()
+    db.refresh(campaign)
+    return campaign
+
+
+@router.delete("/{campaign_id}", status_code=204)
+async def delete_campaign(campaign_id: int, db: Session = Depends(get_db)):
+    """Delete a campaign and all its jobs. Not allowed while campaign is active."""
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign.status == CampaignStatus.active:
+        raise HTTPException(status_code=400, detail="Cancel the campaign before deleting it.")
+    db.query(MessageJob).filter(MessageJob.campaign_id == campaign_id).delete()
+    db.delete(campaign)
+    db.commit()
 
 
 @router.post("/{campaign_id}/pause", response_model=CampaignResponse)

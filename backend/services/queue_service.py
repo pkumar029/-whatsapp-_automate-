@@ -18,7 +18,7 @@ from services import whatsapp_service
 logger = logging.getLogger(__name__)
 
 
-def create_campaign(db: Session, data: CampaignCreate) -> Campaign:
+def create_campaign(db: Session, data: CampaignCreate, wa_account: Optional[str] = None) -> Campaign:
     """Create a new Campaign and schedule message jobs for each contact with variable templates."""
     # Validate contacts list
     if not data.contacts:
@@ -33,6 +33,7 @@ def create_campaign(db: Session, data: CampaignCreate) -> Campaign:
     # Create Campaign record
     campaign = Campaign(
         name=data.name,
+        wa_account=wa_account,
         status=CampaignStatus.active,
         delay_seconds=data.delay_seconds or 0,
         concurrency=data.concurrency or 1,

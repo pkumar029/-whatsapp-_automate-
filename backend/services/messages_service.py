@@ -244,3 +244,10 @@ def get_failed_count(db: Session, wa_account: Optional[str] = None) -> int:
     if wa_account:
         q = q.filter(Message.wa_account == wa_account)
     return q.scalar() or 0
+
+
+def get_received_count(db: Session, wa_account: Optional[str] = None) -> int:
+    q = db.query(func.count(Message.id)).filter(Message.direction == MessageDirection.inbound)
+    if wa_account:
+        q = q.filter(Message.wa_account == wa_account)
+    return q.scalar() or 0

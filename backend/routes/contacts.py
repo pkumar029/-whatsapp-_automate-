@@ -1,7 +1,9 @@
 """
 Contacts Routes — Full CRUD with search and filtering
 """
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+import asyncio
+import json
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse
 from typing import Optional
 from sqlalchemy.orm import Session
@@ -16,7 +18,7 @@ router = APIRouter(prefix="/contacts", tags=["Contacts"])
 @router.get("", response_model=ContactListResponse)
 async def list_contacts(
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=500),
+    limit: int = Query(20, ge=1, le=2000),
     search: Optional[str] = Query(None),
     is_active: Optional[bool] = Query(None),
     wa_account: Optional[str] = Query(None),
@@ -56,14 +58,43 @@ async def search_contacts(q: str = Query(..., min_length=1), db: Session = Depen
 
 
 @router.post("/sync")
-async def sync_contacts(db: Session = Depends(get_db)):
-    """Sync contacts from the connected WhatsApp session."""
-    try:
-        return contacts_service.sync_whatsapp_contacts(db)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def sync_contacts(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Start a background contact sync and return immediately.
+    Poll GET /contacts/sync-progress for live progress."""
+    from database.connection import SessionLocal
+
+    def _run_sync():
+        bg_db = SessionLocal()
+        try:
+            contacts_service.sync_whatsapp_contacts(bg_db)
+        except Exception:
+            pass
+        finally:
+            bg_db.close()
+
+    background_tasks.add_task(_run_sync)
+    return {"success": True, "message": "Sync started — poll /contacts/sync-progress for updates."}
+
+
+@router.get("/sync-progress")
+async def sync_progress(request: Request):
+    """SSE endpoint — streams contact sync progress in real time."""
+
+    async def generator():
+        while True:
+            if await request.is_disconnected():
+                return
+            state = contacts_service.get_sync_progress()
+            yield f"data: {json.dumps(state)}\n\n"
+            if state.get("status") in ("complete", "error"):
+                return
+            await asyncio.sleep(0.4)
+
+    return StreamingResponse(
+        generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
 
 
 @router.get("/export")
@@ -279,19 +310,24 @@ def get_group_members(contact_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{contact_id}/profile-pic")
 def get_profile_pic(contact_id: int, db: Session = Depends(get_db)):
-    """Proxy request to WhatsApp bridge to get contact profile picture URL."""
+    """Return contact profile picture URL, using cached DB value when available."""
     from config.settings import settings
     contact = contacts_service.get_contact_by_id(db, contact_id)
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
+
+    # Return cached URL immediately (no bridge round-trip needed)
+    if contact.profile_pic_url:
+        return {"url": contact.profile_pic_url, "phone": contact.phone, "cached": True}
+
     try:
         import httpx
-        r = httpx.get(
-            f"{settings.BRIDGE_URL}/profile-pic",
-            params={"phone": contact.phone},
-            timeout=8.0
-        )
-        data = r.json()
-        return {"url": data.get("url"), "phone": contact.phone}
+        r = httpx.get(f"{settings.BRIDGE_URL}/profile-pic", params={"phone": contact.phone}, timeout=8.0)
+        url = r.json().get("url") if r.status_code == 200 else None
+        if url:
+            contact.profile_pic_url = url
+            db.add(contact)
+            db.commit()
+        return {"url": url, "phone": contact.phone, "cached": False}
     except Exception:
-        return {"url": None, "phone": contact.phone}
+        return {"url": None, "phone": contact.phone, "cached": False}

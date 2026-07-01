@@ -11,7 +11,13 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
 class LoginRequest(BaseModel):
-    email: str
+    username: str
+    password: str
+
+
+class RegisterRequest(BaseModel):
+    name: str
+    username: str
     password: str
 
 
@@ -22,7 +28,7 @@ class ChangePasswordRequest(BaseModel):
 
 class UpdateProfileRequest(BaseModel):
     name: Optional[str] = None
-    email: Optional[str] = None
+    username: Optional[str] = None
 
 
 def _get_user_from_request(request: Request, db: Session):
@@ -37,15 +43,62 @@ def _get_user_from_request(request: Request, db: Session):
     return user
 
 
+@router.post("/register", status_code=201)
+async def register(data: RegisterRequest, db: Session = Depends(get_db)):
+    """Register a new user account."""
+    from models.models import User
+    from services.auth_service import hash_password, create_access_token
+
+    name = data.name.strip()
+    username = data.username.lower().strip()
+    if not name or not username or not data.password:
+        raise HTTPException(status_code=400, detail="Name, username, and password are required")
+    if len(data.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    existing = db.query(User).filter(User.email == username).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Username already taken")
+
+    user = User(
+        name=name,
+        email=username,
+        password_hash=hash_password(data.password),
+        is_active=True,
+        is_admin=False,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    token = create_access_token(user.id, user.email, user.name)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "username": user.email,
+            "is_admin": user.is_admin,
+        },
+    }
+
+
+@router.post("/logout")
+async def logout():
+    """Logout — client should discard the JWT; server is stateless."""
+    return {"success": True, "message": "Logged out"}
+
+
 @router.post("/login")
 async def login(data: LoginRequest, db: Session = Depends(get_db)):
-    """Authenticate with email + password and receive a JWT access token."""
+    """Authenticate with username + password and receive a JWT access token."""
     from models.models import User
     from services.auth_service import verify_password, create_access_token
 
-    user = db.query(User).filter(User.email == data.email.lower().strip()).first()
+    user = db.query(User).filter(User.email == data.username.lower().strip()).first()
     if not user or not verify_password(data.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+        raise HTTPException(status_code=401, detail="Invalid username or password")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account is disabled")
 
@@ -56,7 +109,7 @@ async def login(data: LoginRequest, db: Session = Depends(get_db)):
         "user": {
             "id": user.id,
             "name": user.name,
-            "email": user.email,
+            "username": user.email,
             "is_admin": user.is_admin,
         },
     }
@@ -69,7 +122,7 @@ async def get_me(request: Request, db: Session = Depends(get_db)):
     return {
         "id": user.id,
         "name": user.name,
-        "email": user.email,
+        "username": user.email,
         "is_admin": user.is_admin,
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
@@ -77,21 +130,21 @@ async def get_me(request: Request, db: Session = Depends(get_db)):
 
 @router.put("/me")
 async def update_me(data: UpdateProfileRequest, request: Request, db: Session = Depends(get_db)):
-    """Update the current user's name or email."""
+    """Update the current user's name or username."""
     from datetime import datetime
     user = _get_user_from_request(request, db)
     if data.name:
         user.name = data.name.strip()
-    if data.email:
-        new_email = data.email.lower().strip()
+    if data.username:
+        new_username = data.username.lower().strip()
         from models.models import User
-        conflict = db.query(User).filter(User.email == new_email, User.id != user.id).first()
+        conflict = db.query(User).filter(User.email == new_username, User.id != user.id).first()
         if conflict:
-            raise HTTPException(status_code=409, detail="Email already in use")
-        user.email = new_email
+            raise HTTPException(status_code=409, detail="Username already taken")
+        user.email = new_username
     user.updated_at = datetime.utcnow()
     db.commit()
-    return {"id": user.id, "name": user.name, "email": user.email, "is_admin": user.is_admin}
+    return {"id": user.id, "name": user.name, "username": user.email, "is_admin": user.is_admin}
 
 
 @router.post("/change-password")

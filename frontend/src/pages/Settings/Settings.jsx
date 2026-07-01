@@ -10,7 +10,7 @@ import {
   Image as ImageIcon, Archive, FileDown, Trash2, ScrollText,
   Sparkles, FlaskConical
 } from 'lucide-react'
-import { whatsappApi, logsApi, aiApi } from '../../services/api'
+import { whatsappApi, logsApi, aiApi, authApi } from '../../services/api'
 import { useApp } from '../../context/AppContext'
 import { SHORTCUT_GROUPS, getShortcutsEnabled, setShortcutsEnabled } from '../../hooks/useKeyboardShortcuts'
 import { formatIST } from '../../utils/date'
@@ -1204,11 +1204,13 @@ export default function Settings() {
   }
 
   const handleLogout = async () => {
-    try {
-      await whatsappApi.disconnect()
-      await refreshSessionStatus()
-    } catch { }
-    navigate('/login')
+    try { await whatsappApi.disconnect() } catch { }
+    try { await authApi.logout() } catch { }
+    localStorage.removeItem('wa_token')
+    localStorage.removeItem('wa_active_phone')
+    localStorage.removeItem('wa_last_sync')
+    localStorage.removeItem('wa_whatsapp_profile')
+    navigate('/auth', { replace: true })
   }
 
   const SectionContent = SECTION_COMPONENTS[active]

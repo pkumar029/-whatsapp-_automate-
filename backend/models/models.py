@@ -132,15 +132,16 @@ class Contact(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
-    phone = Column(String(100), unique=True, nullable=False)
+    phone = Column(String(100), nullable=False)
     email = Column(String(150), nullable=True)
     notes = Column(Text, nullable=True)
     tags = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=True)
     is_blocked = Column(Boolean, default=False)
-    is_valid = Column(Boolean, default=True, nullable=False)  # system flag: False = invalid/system contact
-    is_my_contact = Column(Boolean, default=False)  # True = saved in phone's address book
-    wa_account = Column(String(100), nullable=True)   # connected WhatsApp phone that owns this contact
+    is_valid = Column(Boolean, default=True, nullable=False)
+    is_my_contact = Column(Boolean, default=False)   # True = saved in phone address book
+    profile_pic_url = Column(Text, nullable=True)    # cached profile picture URL
+    wa_account = Column(String(100), nullable=True)  # owning WhatsApp phone
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -196,6 +197,7 @@ class Automation(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(150), nullable=False)
+    wa_account = Column(String(100), nullable=True)
     description = Column(Text, nullable=True)
     trigger_type = Column(Enum(TriggerType), default=TriggerType.manual, nullable=False)
     trigger_config = Column(JSON, nullable=True)
@@ -212,6 +214,7 @@ class Automation(Base):
     __table_args__ = (
         Index("idx_automation_active", "is_active"),
         Index("idx_automation_trigger", "trigger_type"),
+        Index("idx_automation_wa_account", "wa_account"),
     )
 
 
@@ -269,6 +272,7 @@ class Campaign(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(150), nullable=False)
+    wa_account = Column(String(100), nullable=True)
     status = Column(Enum(CampaignStatus), default=CampaignStatus.active, nullable=False)
     delay_seconds = Column(Integer, default=0, nullable=False)
     concurrency = Column(Integer, default=1, nullable=False)
@@ -282,6 +286,7 @@ class Campaign(Base):
 
     __table_args__ = (
         Index("idx_campaigns_status", "status"),
+        Index("idx_campaigns_wa_account", "wa_account"),
     )
 
 

@@ -12,8 +12,12 @@ from models.schemas import AutomationCreate, AutomationUpdate, StepSchema
 logger = logging.getLogger(__name__)
 
 
-def get_automations(db: Session, page: int = 1, limit: int = 20, search: Optional[str] = None) -> dict:
+def get_automations(db: Session, page: int = 1, limit: int = 20, search: Optional[str] = None, wa_account: Optional[str] = None) -> dict:
     query = db.query(Automation)
+    if wa_account:
+        query = query.filter(
+            (Automation.wa_account == wa_account) | Automation.wa_account.is_(None)
+        )
     if search:
         query = query.filter(Automation.name.ilike(f"%{search}%"))
     total = query.count()
@@ -44,9 +48,10 @@ def get_automation_by_id(db: Session, automation_id: int) -> Optional[Automation
     return db.query(Automation).filter(Automation.id == automation_id).first()
 
 
-def create_automation(db: Session, data: AutomationCreate) -> Automation:
+def create_automation(db: Session, data: AutomationCreate, wa_account: Optional[str] = None) -> Automation:
     automation = Automation(
         name=data.name,
+        wa_account=wa_account,
         description=data.description,
         trigger_type=TriggerType(data.trigger_type),
         trigger_config=data.trigger_config,
@@ -133,8 +138,11 @@ def deactivate_automation(db: Session, automation_id: int) -> Optional[Automatio
     return automation
 
 
-def get_active_automations_count(db: Session) -> int:
-    return db.query(func.count(Automation.id)).filter(Automation.is_active == True).scalar() or 0
+def get_active_automations_count(db: Session, wa_account: Optional[str] = None) -> int:
+    q = db.query(func.count(Automation.id)).filter(Automation.is_active == True)
+    if wa_account:
+        q = q.filter((Automation.wa_account == wa_account) | Automation.wa_account.is_(None))
+    return q.scalar() or 0
 
 
 def add_step(db: Session, automation_id: int, data: StepSchema) -> Optional[AutomationStep]:

@@ -87,6 +87,14 @@ async def lifespan(app: FastAPI):
          "AND name NOT LIKE 'WhatsApp User %' "
          "AND name NOT REGEXP '^[0-9]{7,}$' "
          "AND name != phone"),
+        ("campaigns wa_account column",
+         "ALTER TABLE campaigns ADD COLUMN wa_account VARCHAR(100) NULL"),
+        ("campaigns wa_account index",
+         "ALTER TABLE campaigns ADD INDEX idx_campaigns_wa_account (wa_account)"),
+        ("automations wa_account column",
+         "ALTER TABLE automations ADD COLUMN wa_account VARCHAR(100) NULL"),
+        ("automations wa_account index",
+         "ALTER TABLE automations ADD INDEX idx_automation_wa_account (wa_account)"),
         ("whatsapp_profiles table",
          "CREATE TABLE IF NOT EXISTS whatsapp_profiles ("
          "  id INT AUTO_INCREMENT PRIMARY KEY,"
@@ -99,6 +107,13 @@ async def lifespan(app: FastAPI):
          "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
          "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
          ")"),
+        ("contacts profile_pic_url column",
+         "ALTER TABLE contacts ADD COLUMN profile_pic_url TEXT NULL"),
+        # Drop global phone uniqueness — same phone can exist under different wa_accounts
+        ("contacts drop global phone unique index",
+         "ALTER TABLE contacts DROP INDEX phone"),
+        ("contacts composite phone+wa_account unique",
+         "ALTER TABLE contacts ADD UNIQUE KEY uq_contact_phone_account (phone, wa_account)"),
     ]
     import asyncio
     def _run_migrations():
@@ -114,6 +129,15 @@ async def lifespan(app: FastAPI):
                     logger.warning(f"Migration note ({_name}): {_msg}")
 
     await asyncio.get_event_loop().run_in_executor(None, _run_migrations)
+
+    # Seed default admin user if no users exist
+    from database.connection import SessionLocal as _SL
+    from services.auth_service import ensure_admin_user
+    _seed_db = _SL()
+    try:
+        ensure_admin_user(_seed_db)
+    finally:
+        _seed_db.close()
 
     from services.queue_service import run_queue_worker_loop
     worker_task = asyncio.create_task(run_queue_worker_loop())
@@ -141,8 +165,14 @@ app = FastAPI(
 )
 
 
+# ─── JWT Auth Middleware ───────────────────────────────────────
+# Starlette applies middlewares in LIFO order — add JWT first so it runs INSIDE CORS.
+# That way CORS headers are present even on 401 responses.
+from middleware.jwt_auth import JWTAuthMiddleware
+app.add_middleware(JWTAuthMiddleware)
+
 # ─── CORS ─────────────────────────────────────────────────────
-# In production, nginx serves everything on port 80 so "*" is safe for LAN
+# Added last → outermost middleware → runs first on every request.
 _cors_origins = (
     ["*"] if settings.CORS_ORIGINS == "*"
     else [o.strip() for o in settings.CORS_ORIGINS.split(",")]

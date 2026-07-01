@@ -56,6 +56,17 @@ let pairingCode = null;
 let lastError = null;
 let currentLinkMethod = 'qr';
 
+// ─── SSE broadcasting ─────────────────────────────────────────
+let sseClients = [];
+
+function pushEvent(type, extra = {}) {
+    const payload = JSON.stringify({ type, ...extra });
+    sseClients = sseClients.filter(res => {
+        try { res.write(`data: ${payload}\n\n`); return true; }
+        catch (_) { return false; }
+    });
+}
+
 // True only when the WhatsApp client AND its Puppeteer browser page are alive.
 // client.pupPage can be null even when clientStatus === 'connected' if the
 // browser process crashed — guard every API handler with this.
@@ -167,6 +178,9 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
                     lastError = `Failed to generate pairing code: ${codeErr.message}`;
                 }
             }
+
+            // Push QR to all SSE listeners instantly
+            pushEvent('qr_ready', { qr: qrCodeBase64, pairing_code: pairingCode });
         } catch (err) {
             console.error('Failed to generate QR base64:', err);
         }
@@ -175,16 +189,16 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
     client.on('ready', async () => {
         console.log('WhatsApp Client is ready!');
         const actualPhone = (client.info && client.info.wid) ? client.info.wid.user : (client.info ? client.info.phone : expectedPhone);
-        
+
         // Security Verification: Ensure actual connected phone number matches expected phone number
-        const shouldVerify = expectedPhone && 
-                             actualPhone && 
-                             currentLinkMethod !== 'qr' && 
+        const shouldVerify = expectedPhone &&
+                             actualPhone &&
+                             currentLinkMethod !== 'qr' &&
                              expectedPhone.length >= 8;
         if (shouldVerify) {
             const cleanActual = actualPhone.replace(/\D/g, '');
-            const isMatch = cleanActual === expectedPhone || 
-                            cleanActual.endsWith(expectedPhone) || 
+            const isMatch = cleanActual === expectedPhone ||
+                            cleanActual.endsWith(expectedPhone) ||
                             expectedPhone.endsWith(cleanActual);
             if (!isMatch) {
                 console.error(`Security alert: Connected phone number (${cleanActual}) does not match expected phone number (${expectedPhone}). Logging out...`);
@@ -193,6 +207,7 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
                 pairingCode = null;
                 connectedPhone = null;
                 lastError = `Security Verification Failed: Connected account (${cleanActual}) does not match the requested phone number (${expectedPhone}).`;
+                pushEvent('error', { message: lastError });
                 try {
                     await client.logout();
                     await client.destroy();
@@ -206,15 +221,17 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
                 return;
             }
         }
-        
+
         clientStatus = 'connected';
         qrCodeBase64 = null;
         pairingCode = null;
         connectedPhone = actualPhone;
+        pushEvent('connected', { phone: connectedPhone });
     });
 
     client.on('authenticated', () => {
         console.log('WhatsApp Client authenticated.');
+        pushEvent('authenticated');
     });
 
     client.on('auth_failure', (msg) => {
@@ -223,6 +240,7 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
         lastError = `Auth failure: ${msg}`;
         qrCodeBase64 = null;
         pairingCode = null;
+        pushEvent('error', { message: lastError });
     });
 
     client.on('disconnected', (reason) => {
@@ -231,6 +249,7 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
         connectedPhone = null;
         qrCodeBase64 = null;
         pairingCode = null;
+        pushEvent('disconnected', { reason });
     });
 
     client.on('message', async (msg) => {
@@ -264,11 +283,12 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
 
             console.log(`Inbound message from ${name} (${phone}): ${msg.body}`);
             const content = msg.body;
+            const messageId = msg.id._serialized;
             
-            await fetch('http://localhost:7001/api/v1/whatsapp/webhook', {
+            await fetch('http://localhost:7003/api/v1/whatsapp/webhook', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phone, content, name, tags })
+                body: JSON.stringify({ phone, content, name, tags, messageId })
             });
         } catch (err) {
             console.error('Failed to forward inbound message to webhook:', err.message);
@@ -291,6 +311,30 @@ app.get('/status', (req, res) => {
         phone: connectedPhone,
         pairing_code: pairingCode,
         error: lastError
+    });
+});
+
+// SSE stream — pushes real-time events to listeners (frontend login flow)
+app.get('/events', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    // Send current state immediately so the client knows where things stand
+    const snapshot = JSON.stringify({
+        type: 'status',
+        bridge_status: clientStatus,
+        qr: qrCodeBase64,
+        phone: connectedPhone,
+        pairing_code: pairingCode,
+    });
+    res.write(`data: ${snapshot}\n\n`);
+
+    sseClients.push(res);
+    req.on('close', () => {
+        sseClients = sseClients.filter(c => c !== res);
     });
 });
 
@@ -356,7 +400,7 @@ async function resolveJid(phone) {
 
     try {
         const numberId = await client.getNumberId(raw);
-        if (numberId && numberId._serialized && !numberId._serialized.includes('@lid')) {
+        if (numberId && numberId._serialized) {
             return numberId._serialized;
         }
     } catch (_) { /* fall through to @c.us default */ }
@@ -466,13 +510,15 @@ app.get('/contacts', async (req, res) => {
                 const isGroup = c.isGroup || jid.endsWith('@g.us');
                 if (isGroup) return true;
 
-                // Only sync contacts explicitly saved in the phone's address book
-                return c.isMyContact === true;
+                // Include ALL valid WhatsApp contacts — address-book AND chat-only.
+                // is_my_contact flag in the response lets the backend decide how to classify.
+                return true;
             })
             .map(c => {
                 const jid = c.id._serialized;
+                const isGroup = c.isGroup || jid.endsWith('@g.us');
                 let type = 'User';
-                if (c.isGroup || jid.endsWith('@g.us')) {
+                if (isGroup) {
                     type = 'Group';
                 }
 
@@ -491,7 +537,12 @@ app.get('/contacts', async (req, res) => {
                     }
                 }
 
-                return { name, phone, type };
+                return {
+                    name,
+                    phone,
+                    type,
+                    is_my_contact: c.isMyContact === true,  // true = saved in phone address book
+                };
             })
             .filter(c => {
                 if (!c.phone || !c.name) return false;
@@ -779,12 +830,124 @@ app.get('/my-profile', async (req, res) => {
 });
 
 // GET /sync-messages — full chat history for all chats (used on login to backfill DB)
+app.get('/contacts/count', async (req, res) => {
+    if (!isClientReady()) {
+        return res.status(400).json({ success: false, count: 0, error: 'Not connected' });
+    }
+    try {
+        const contacts = await client.getContacts();
+        const chats = await client.getChats();
+        const total = new Set([
+            ...contacts.filter(c => c.id && c.id._serialized && c.id.server !== 'lid' && c.id.server !== 'newsletter' && c.id.server !== 'broadcast').map(c => c.id._serialized),
+            ...chats.filter(c => c.id && c.id._serialized).map(c => c.id._serialized),
+        ]).size;
+        res.json({ success: true, count: total });
+    } catch (e) {
+        res.json({ success: false, count: 0, error: e.message });
+    }
+});
+
+// GET /contacts/sync-stream — SSE endpoint that streams sync progress while returning contacts in batches
+app.get('/contacts/sync-stream', async (req, res) => {
+    if (!isClientReady()) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders();
+        res.write(`data: ${JSON.stringify({ type: 'error', message: 'WhatsApp client is not connected' })}\n\n`);
+        res.end();
+        return;
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const send = (data) => {
+        try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch (_) {}
+    };
+
+    try {
+        send({ type: 'progress', phase: 'fetching', message: 'Fetching contacts from WhatsApp...' });
+
+        const contacts = await client.getContacts();
+        let chats = [];
+        try { chats = await client.getChats(); } catch (_) {}
+
+        send({ type: 'progress', phase: 'fetching', message: `Got ${contacts.length} address-book entries + ${chats.length} chats` });
+
+        // Build unified contact map (same logic as /contacts endpoint)
+        const contactMap = new Map();
+        for (const c of contacts) {
+            if (c.id && c.id._serialized) contactMap.set(c.id._serialized, c);
+        }
+        for (const chat of chats) {
+            if (chat.id && chat.id._serialized) {
+                if (!contactMap.has(chat.id._serialized)) {
+                    contactMap.set(chat.id._serialized, { id: chat.id, name: chat.name, isGroup: chat.isGroup, isUser: chat.id.server === 'c.us', number: chat.id.user, fromActiveChat: true });
+                } else {
+                    const ex = contactMap.get(chat.id._serialized);
+                    ex.fromActiveChat = true;
+                    contactMap.set(chat.id._serialized, ex);
+                }
+            }
+        }
+
+        const allEntries = Array.from(contactMap.values()).filter(c => {
+            if (!c.id || !c.id._serialized) return false;
+            const server = c.id.server || '';
+            if (server === 'lid' || server === 'newsletter' || server === 'broadcast') return false;
+            return true;
+        });
+
+        const total = allEntries.length;
+        send({ type: 'progress', phase: 'processing', message: `Processing ${total} contacts...`, total, current: 0 });
+
+        const BATCH_SIZE = 50;
+        const VALID_PHONE_RE = /^\+\d{7,13}$/;
+        let processed = 0;
+
+        for (let i = 0; i < allEntries.length; i += BATCH_SIZE) {
+            const batch = allEntries.slice(i, i + BATCH_SIZE).map(c => {
+                const jid = c.id._serialized;
+                const isGroup = c.isGroup || jid.endsWith('@g.us');
+                const type = isGroup ? 'Group' : 'User';
+                const num = c.number || (c.id && c.id.user);
+                let phone = type === 'User' ? (num ? '+' + num : jid) : jid;
+                let name = c.name || c.pushname || c.shortName || c.verifiedName;
+                if (!name) name = isGroup ? 'Unnamed Group (' + jid.split('@')[0] + ')' : (num || 'Unnamed Contact');
+                return { name, phone, type, is_my_contact: c.isMyContact === true };
+            }).filter(c => {
+                if (!c.phone || !c.name) return false;
+                if (c.type === 'Group') return true;
+                return VALID_PHONE_RE.test(c.phone);
+            });
+
+            processed += BATCH_SIZE;
+            if (processed > total) processed = total;
+
+            send({ type: 'batch', contacts: batch, current: processed, total, phase: 'syncing' });
+
+            // Small delay to avoid flooding
+            await new Promise(r => setTimeout(r, 50));
+        }
+
+        send({ type: 'complete', message: `Sync complete: ${total} contacts processed`, total });
+    } catch (err) {
+        send({ type: 'error', message: err.message });
+    } finally {
+        res.end();
+    }
+});
+
 app.get('/sync-messages', async (req, res) => {
     if (!isClientReady()) {
         return res.json({ success: false, chats: [], error: 'Not connected' });
     }
-    const msgLimit = parseInt(req.query.msgLimit) || 50;   // messages per chat
-    const chatLimit = parseInt(req.query.chatLimit) || 60; // number of chats
+    const msgLimit = parseInt(req.query.msgLimit) || 100;   // messages per chat
+    const chatLimit = parseInt(req.query.chatLimit) || 500; // all chats by default
     try {
         const VALID_PHONE_RE = /^\+\d{7,13}$/;
         const chats = await client.getChats();
@@ -867,6 +1030,67 @@ app.get('/recent-messages', async (req, res) => {
         res.json({ success: true, messages: recent });
     } catch (e) {
         res.json({ success: false, messages: [] });
+    }
+});
+
+app.post('/send-media', async (req, res) => {
+    const { phone, mediaUrl, caption } = req.body;
+    if (!phone || !mediaUrl) {
+        return res.status(400).json({ success: false, error: 'Phone and mediaUrl are required' });
+    }
+    if (!isClientReady()) {
+        return res.status(400).json({ success: false, error: 'WhatsApp client is not connected' });
+    }
+    try {
+        const jid = await resolveJid(phone);
+        console.log(`Sending media ${mediaUrl} to ${jid}...`);
+        
+        const { MessageMedia } = await import('whatsapp-web.js');
+        
+        let media;
+        if (mediaUrl.startsWith('data:')) {
+            const matches = mediaUrl.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+            if (matches && matches.length === 3) {
+                media = new MessageMedia(matches[1], matches[2]);
+            } else {
+                throw new Error('Invalid base64 mediaUrl format');
+            }
+        } else {
+            media = await MessageMedia.fromUrl(mediaUrl, { unsafeMime: true });
+        }
+        
+        const opts = caption ? { caption } : {};
+        const msg = await client.sendMessage(jid, media, opts);
+        res.json({ success: true, message_id: msg.id.id, status: 'sent' });
+    } catch (err) {
+        console.error('Failed to send media:', err.message);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/react', async (req, res) => {
+    const { messageId, emoji } = req.body;
+    if (!messageId || !emoji) {
+        return res.status(400).json({ success: false, error: 'messageId and emoji are required' });
+    }
+    if (!isClientReady()) {
+        return res.status(400).json({ success: false, error: 'WhatsApp client is not connected' });
+    }
+    try {
+        console.log(`Reacting to message ${messageId} with ${emoji}...`);
+        let msg;
+        try {
+            msg = await client.getMessageById(messageId);
+        } catch (_) {}
+        if (msg) {
+            await msg.react(emoji);
+            res.json({ success: true, message: 'Reaction sent successfully' });
+        } else {
+            res.status(404).json({ success: false, error: 'Message not found' });
+        }
+    } catch (err) {
+        console.error('Failed to send reaction:', err.message);
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 

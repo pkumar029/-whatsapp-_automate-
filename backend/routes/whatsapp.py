@@ -1,7 +1,11 @@
 """
 WhatsApp Routes — Connect, disconnect, status, send message
 """
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+import asyncio
+import json
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
+from fastapi.responses import StreamingResponse
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from database.connection import get_db
@@ -15,6 +19,69 @@ router = APIRouter(prefix="/whatsapp", tags=["WhatsApp"])
 async def get_status(db: Session = Depends(get_db)):
     """Get current WhatsApp session status."""
     return whatsapp_service.get_session_status(db)
+
+
+@router.get("/events")
+async def whatsapp_events(request: Request):
+    """SSE stream — proxies real-time bridge events so the frontend login flow
+    gets instant QR, connected, and disconnected notifications without polling."""
+
+    async def generator():
+        # Send current bridge state immediately on connect
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as hc:
+                r = await hc.get("http://localhost:7002/status")
+                if r.status_code == 200:
+                    d = r.json()
+                    yield f"data: {json.dumps({'type': 'status', 'bridge_status': d.get('status'), 'qr': d.get('qr'), 'phone': d.get('phone'), 'pairing_code': d.get('pairing_code')})}\n\n"
+        except Exception:
+            yield f"data: {json.dumps({'type': 'status', 'bridge_status': 'unavailable'})}\n\n"
+
+        # Proxy the bridge's SSE stream; fall back to polling if unavailable
+        bridge_sse_ok = False
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=3.0)) as hc:
+                async with hc.stream("GET", "http://localhost:7002/events") as stream:
+                    bridge_sse_ok = True
+                    async for line in stream.aiter_lines():
+                        if await request.is_disconnected():
+                            return
+                        if line.strip():
+                            yield f"{line}\n\n"
+        except Exception:
+            pass
+
+        if not bridge_sse_ok:
+            # Bridge doesn't support SSE yet — fall back to 1.5 s polling
+            while True:
+                if await request.is_disconnected():
+                    return
+                await asyncio.sleep(1.5)
+                try:
+                    async with httpx.AsyncClient(timeout=3.0) as hc:
+                        r = await hc.get("http://localhost:7002/status")
+                        if r.status_code == 200:
+                            d = r.json()
+                            payload = json.dumps({
+                                'type': 'status',
+                                'bridge_status': d.get('status'),
+                                'qr': d.get('qr'),
+                                'phone': d.get('phone'),
+                                'pairing_code': d.get('pairing_code'),
+                            })
+                            yield f"data: {payload}\n\n"
+                except Exception:
+                    pass
+
+    return StreamingResponse(
+        generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @router.post("/connect", response_model=WhatsAppConnectResponse)
@@ -92,6 +159,7 @@ class WebhookPayload(BaseModel):
     content: str
     name: Optional[str] = None
     tags: Optional[List[str]] = None
+    messageId: Optional[str] = None
 
 @router.post("/webhook")
 async def whatsapp_webhook(payload: WebhookPayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
@@ -147,6 +215,7 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
             direction=MessageDirection.inbound,
             content=content,
             status=MessageStatus.read,
+            whatsapp_message_id=payload.messageId,
             sent_at=datetime.utcnow()
         )
         db.add(msg)
@@ -176,7 +245,11 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
         from services.automation_runner import run_automation
         from database.connection import SessionLocal
 
-        active_automations = db.query(Automation).filter(Automation.is_active == True).all()
+        active_automations = db.query(Automation).filter(
+            Automation.is_active == True
+        ).filter(
+            (Automation.wa_account == wa_account) | Automation.wa_account.is_(None)
+        ).all()
         for automation in active_automations:
             should_trigger = False
             trigger_reason = ""
@@ -242,7 +315,8 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
                 trigger_data = {
                     "phone": phone,
                     "content": content,
-                    "contact_id": contact.id
+                    "contact_id": contact.id,
+                    "whatsapp_message_id": payload.messageId
                 }
                 background_tasks.add_task(bg_run, automation.id, trigger_data)
 

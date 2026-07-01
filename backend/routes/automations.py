@@ -12,20 +12,30 @@ from models.schemas import AutomationCreate, AutomationUpdate, AutomationListRes
 router = APIRouter(prefix="/automations", tags=["Automations"])
 
 
+def _active_wa_account(db: Session) -> Optional[str]:
+    from models.models import WhatsappSession, SessionStatus as SS
+    session = db.query(WhatsappSession).filter(WhatsappSession.status == SS.connected).first()
+    return session.phone if session else None
+
+
 @router.get("", response_model=AutomationListResponse)
 async def list_automations(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     search: Optional[str] = Query(None),
+    wa_account: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    return automations_service.get_automations(db, page=page, limit=limit, search=search)
+    if not wa_account:
+        wa_account = _active_wa_account(db)
+    return automations_service.get_automations(db, page=page, limit=limit, search=search, wa_account=wa_account)
 
 
 @router.post("", status_code=201)
 async def create_automation(data: AutomationCreate, db: Session = Depends(get_db)):
     try:
-        automation = automations_service.create_automation(db, data)
+        wa_account = _active_wa_account(db)
+        automation = automations_service.create_automation(db, data, wa_account=wa_account)
         return {"success": True, "id": automation.id, "name": automation.name}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

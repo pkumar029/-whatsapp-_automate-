@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Users, Plus, Search, Edit2, Trash2, Phone, X, Check, RefreshCw, WifiOff, Megaphone, User, Download, Upload, Mail } from 'lucide-react'
+import { Users, Plus, Search, Edit2, Trash2, Phone, X, Check, RefreshCw, WifiOff, Megaphone, User, Download, Upload, BookUser } from 'lucide-react'
 import { contactsApi, whatsappApi } from '../../services/api'
 import { useApp } from '../../context/AppContext'
 import { Link } from 'react-router-dom'
@@ -95,13 +95,15 @@ export default function Contacts() {
   // Sync states
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
+  const [syncProgress, setSyncProgress] = useState(null) // { current, total, message, status }
+  const syncEsRef = useRef(null)
 
   // Import/Export
   const [importing, setImporting] = useState(false)
   const [importMsg, setImportMsg]  = useState('')
   const importInputRef = useRef(null)
 
-  // Filter states
+  // Filter states — 'all' | 'saved' | 'unsaved' | 'group'
   const [filterType, setFilterType] = useState('all')
 
   // Use AppContext session so this page reacts to connect/disconnect immediately
@@ -110,7 +112,8 @@ export default function Contacts() {
   const fetchContacts = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await contactsApi.getAll({ search, page: 1, limit: 500, saved_only: true })
+      // No saved_only filter — show ALL valid contacts (address-book + chat-only + groups)
+      const res = await contactsApi.getAll({ search, page: 1, limit: 1000 })
       setContacts(res.data?.contacts || res.data || [])
     } catch {
       setContacts([])
@@ -160,19 +163,61 @@ export default function Contacts() {
   }
 
   const handleSync = async () => {
+    if (syncing) return
     setSyncing(true)
     setSyncMessage('')
+    setSyncProgress({ status: 'running', current: 0, total: 0, message: 'Starting sync...' })
+
+    // Close any previous SSE connection
+    if (syncEsRef.current) { try { syncEsRef.current.close() } catch (_) {} }
+
     try {
-      const res = await contactsApi.sync()
-      setSyncMessage(res.data?.message || 'Contacts synced successfully!')
-      fetchContacts()
+      // Start the background sync
+      await contactsApi.sync()
+
+      // Subscribe to SSE progress stream
+      const es = new EventSource(contactsApi.syncProgressUrl())
+      syncEsRef.current = es
+
+      es.onmessage = (evt) => {
+        try {
+          const data = JSON.parse(evt.data)
+          setSyncProgress(data)
+          if (data.status === 'complete') {
+            setSyncMessage(data.message || 'Sync complete!')
+            setSyncing(false)
+            setSyncProgress(null)
+            es.close()
+            fetchContacts()
+            setTimeout(() => setSyncMessage(''), 8000)
+          } else if (data.status === 'error') {
+            setSyncMessage(data.error || 'Sync failed.')
+            setSyncing(false)
+            setSyncProgress(null)
+            es.close()
+            setTimeout(() => setSyncMessage(''), 6000)
+          }
+        } catch (_) {}
+      }
+
+      es.onerror = () => {
+        es.close()
+        setSyncing(false)
+        setSyncProgress(null)
+        fetchContacts()
+      }
     } catch (err) {
       setSyncMessage(getErrorMessage(err, 'Sync failed.'))
-    } finally {
       setSyncing(false)
+      setSyncProgress(null)
       setTimeout(() => setSyncMessage(''), 6000)
     }
   }
+
+  // Cleanup SSE on unmount
+  useEffect(() => {
+    return () => { if (syncEsRef.current) try { syncEsRef.current.close() } catch (_) {} }
+  }, [])
 
   const openEdit = (contact) => { setEditContact(contact); setShowModal(true) }
   const openAdd = () => { setEditContact(null); setShowModal(true) }
@@ -203,19 +248,38 @@ export default function Contacts() {
     }
   }
 
-  // Backend already returns only saved contacts (saved_only=true); no client-side split needed
+  const isGroup = (c) => c.tags?.includes('Group') || c.phone?.endsWith('@g.us')
+  const isTeam = (c) => c.tags?.includes('Team')
+
+  // Exclude system accounts that should never be shown to users
+  const isValidContact = (c) => {
+    if (!c.phone) return false
+    const p = c.phone
+    if (p.includes('@broadcast')) return false
+    if (p.includes('@newsletter')) return false
+    if (p === 'status@broadcast') return false
+    if (p.includes('@lid')) return false
+    // Groups are always valid if they have a name
+    if (isGroup(c)) return !!c.name
+    // User contacts must have a valid phone number
+    return /^\+?\d{7,15}$/.test(p.replace(/\s/g, '')) || p.endsWith('@c.us')
+  }
+  const isSaved = (c) => c.is_my_contact === true
+
+  // Only show valid contacts (filter out system/broadcast/newsletter/malformed)
+  const validContacts = contacts.filter(isValidContact)
+
   const counts = {
-    all: contacts.length,
-    individual: contacts.filter(c => !c.tags?.includes('Group') && !c.tags?.includes('Team')).length,
-    group: contacts.filter(c => c.tags?.includes('Group')).length,
-    team: contacts.filter(c => c.tags?.includes('Team')).length,
+    all:    validContacts.length,
+    saved:  validContacts.filter(c => !isGroup(c) && !isTeam(c) && isSaved(c)).length,
+    unsaved: validContacts.filter(c => !isGroup(c) && !isTeam(c) && !isSaved(c)).length,
+    group:  validContacts.filter(c => isGroup(c)).length,
   }
 
-  const filteredContacts = contacts.filter(c => {
-    const isGroup = c.tags?.includes('Group')
-    const isTeam = c.tags?.includes('Team')
-    const type = isGroup ? 'group' : (isTeam ? 'team' : 'individual')
-    if (filterType !== 'all' && type !== filterType) return false
+  const filteredContacts = validContacts.filter(c => {
+    if (filterType === 'saved')   return !isGroup(c) && !isTeam(c) && isSaved(c)
+    if (filterType === 'unsaved') return !isGroup(c) && !isTeam(c) && !isSaved(c)
+    if (filterType === 'group')   return isGroup(c)
     return true
   })
 
@@ -253,7 +317,9 @@ export default function Contacts() {
       <div className="page-header">
         <div>
           <h2 className="page-title">Contacts</h2>
-          <p className="page-subtitle">{counts.all} contacts</p>
+          <p className="page-subtitle">
+            {counts.all} total · {counts.saved} saved · {counts.unsaved} chat-only · {counts.group} groups
+          </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <button className="btn btn-ghost" onClick={handleExport} title="Export contacts as CSV">
@@ -272,6 +338,33 @@ export default function Contacts() {
           </button>
         </div>
       </div>
+
+      {/* Sync progress bar */}
+      {syncing && syncProgress && (
+        <div style={{ background: 'rgba(37,211,102,0.08)', border: '1px solid rgba(37,211,102,0.25)', borderRadius: 'var(--radius-md)', padding: '12px 16px', marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: 13, color: 'var(--accent-primary)', fontWeight: 500 }}>
+              {syncProgress.message || 'Syncing contacts...'}
+            </span>
+            {syncProgress.total > 0 && (
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                {syncProgress.current} / {syncProgress.total}
+              </span>
+            )}
+          </div>
+          {syncProgress.total > 0 && (
+            <div style={{ height: 4, background: 'rgba(255,255,255,0.08)', borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%',
+                background: 'var(--accent-primary)',
+                borderRadius: 2,
+                width: `${Math.min(100, Math.round((syncProgress.current / syncProgress.total) * 100))}%`,
+                transition: 'width 0.3s ease',
+              }} />
+            </div>
+          )}
+        </div>
+      )}
 
       {syncMessage && (
         <div style={{ background: 'var(--accent-primary-muted)', border: '1px solid rgba(37,211,102,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 14px', marginBottom: 12, fontSize: 'var(--font-size-sm)', color: 'var(--accent-primary)' }}>
@@ -300,10 +393,10 @@ export default function Contacts() {
 
             <div style={{ display: 'flex', gap: 4, background: 'rgba(255,255,255,0.05)', padding: 3, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
               {[
-                { id: 'all', label: `All (${counts.all})` },
-                { id: 'individual', label: `Individuals (${counts.individual})` },
-                { id: 'group', label: `Groups (${counts.group})` },
-                ...(counts.team > 0 ? [{ id: 'team', label: `Teams (${counts.team})` }] : []),
+                { id: 'all',     label: `All (${counts.all})` },
+                { id: 'saved',   label: `Saved (${counts.saved})` },
+                { id: 'unsaved', label: `Chat-only (${counts.unsaved})` },
+                { id: 'group',   label: `Groups (${counts.group})` },
               ].map(({ id, label }) => (
                 <button
                   key={id}
@@ -322,7 +415,18 @@ export default function Contacts() {
         </div>
 
         {loading ? (
-          <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)' }}>Loading contacts...</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+            <style>{`@keyframes skpulse{0%,100%{opacity:0.35}50%{opacity:0.7}}`}</style>
+            {[...Array(12)].map((_, i) => (
+              <div key={i} style={{ background: 'var(--bg-card)', border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-md)', padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'var(--bg-tertiary)', flexShrink: 0, animation: 'skpulse 1.5s ease-in-out infinite' }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ height: 13, background: 'var(--bg-tertiary)', borderRadius: 4, width: `${50 + i * 5}%`, marginBottom: 8, animation: 'skpulse 1.5s ease-in-out infinite' }} />
+                  <div style={{ height: 11, background: 'var(--bg-tertiary)', borderRadius: 4, width: `${40 + i * 4}%`, animation: 'skpulse 1.5s ease-in-out infinite' }} />
+                </div>
+              </div>
+            ))}
+          </div>
         ) : filteredContacts.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon"><Users size={28} /></div>
@@ -355,36 +459,42 @@ export default function Contacts() {
             </thead>
             <tbody>
               {filteredContacts.map(c => {
-                const isGroup = c.tags?.includes('Group')
-                const isTeam = c.tags?.includes('Team')
+                const cIsGroup = isGroup(c)
+                const cIsTeam = isTeam(c)
+                const cIsSaved = isSaved(c)
 
-                const picUrl = !isGroup && !isTeam ? (profilePics[c.id] || null) : null
+                const picUrl = !cIsGroup && !cIsTeam ? (profilePics[c.id] || null) : null
 
-                let badgeClass = 'badge-green'
-                let badgeLabel = 'Individual'
-                if (isGroup) { badgeClass = 'badge-indigo'; badgeLabel = 'Group' }
-                else if (isTeam) { badgeClass = 'badge-teal'; badgeLabel = 'Team' }
+                let badgeClass = cIsSaved ? 'badge-green' : 'badge-gray'
+                let badgeLabel = cIsSaved ? 'Saved' : 'Chat-only'
+                if (cIsGroup) { badgeClass = 'badge-indigo'; badgeLabel = 'Group' }
+                else if (cIsTeam) { badgeClass = 'badge-teal'; badgeLabel = 'Team' }
 
                 return (
                   <tr key={c.id}>
                     <td className="td-primary" style={{ display: 'flex', alignItems: 'center', gap: 10, borderTop: 'none' }}>
                       <div style={{
                         width: 34, height: 34, borderRadius: '50%',
-                        background: isGroup ? 'rgba(99,102,241,0.15)' : (isTeam ? 'rgba(45,212,191,0.15)' : (picUrl ? 'transparent' : 'var(--accent-primary-muted)')),
+                        background: cIsGroup ? 'rgba(99,102,241,0.15)' : (cIsTeam ? 'rgba(45,212,191,0.15)' : (picUrl ? 'transparent' : 'var(--accent-primary-muted)')),
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        color: isGroup ? 'rgb(165,180,252)' : (isTeam ? 'rgb(153,246,228)' : 'var(--accent-primary)'),
+                        color: cIsGroup ? 'rgb(165,180,252)' : (cIsTeam ? 'rgb(153,246,228)' : 'var(--accent-primary)'),
                         fontWeight: 700, fontSize: 13, flexShrink: 0,
                         overflow: 'hidden'
                       }}>
                         {picUrl
                           ? <img src={picUrl} alt={c.name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} onError={e => { e.target.style.display = 'none' }} />
-                          : isGroup ? <Users size={16} />
-                          : isTeam ? <Megaphone size={16} />
+                          : cIsGroup ? <Users size={16} />
+                          : cIsTeam ? <Megaphone size={16} />
                           : (c.name?.[0]?.toUpperCase() || <User size={16} />)
                         }
                       </div>
                       <div>
-                        <span style={{ fontWeight: (isGroup || isTeam) ? 600 : 500 }}>{c.name}</span>
+                        <span style={{ fontWeight: (cIsGroup || cIsTeam) ? 600 : 500 }}>{c.name}</span>
+                        {!cIsGroup && !cIsTeam && cIsSaved && (
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1, display: 'flex', alignItems: 'center', gap: 3 }}>
+                            <BookUser size={9} /> Address book
+                          </div>
+                        )}
                       </div>
                     </td>
                     <td style={{ borderTop: 'none' }}>
@@ -440,6 +550,7 @@ export default function Contacts() {
         @keyframes spin { to { transform: rotate(360deg); } }
         .badge-indigo { background: rgba(99,102,241,0.15) !important; color: rgb(165,180,252) !important; border: 1px solid rgba(99,102,241,0.3) !important; }
         .badge-teal   { background: rgba(45,212,191,0.15) !important; color: rgb(153,246,228) !important; border: 1px solid rgba(45,212,191,0.3) !important; }
+        .badge-gray   { background: rgba(255,255,255,0.06) !important; color: var(--text-muted) !important; border: 1px solid rgba(255,255,255,0.1) !important; }
       `}</style>
     </div>
   )

@@ -763,7 +763,7 @@ function AutomationModal({ automation, onClose, onSave }) {
 }
 
 // ─── Automation Card ──────────────────────────────────────────
-function AutomationCard({ automation, onEdit, onDelete, onToggle, onRun, onDuplicate }) {
+function AutomationCard({ automation, onEdit, onDelete, onToggle, onRun, onTestRun, onHistory, onDuplicate }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const meta = TRIGGER_META[automation.trigger_type] || TRIGGER_META.manual
 
@@ -1056,7 +1056,8 @@ export default function Automations() {
   const fetch = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await automationsApi.getAll({ search })
+      const waAccount = localStorage.getItem('wa_active_phone') || undefined
+      const res = await automationsApi.getAll({ search, wa_account: waAccount })
       setAutomations(res.data?.automations || res.data || [])
     } catch { setAutomations([]) } finally { setLoading(false) }
   }, [search])

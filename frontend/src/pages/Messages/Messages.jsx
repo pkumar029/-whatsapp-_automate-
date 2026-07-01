@@ -65,7 +65,13 @@ function avatarColor(name) {
 
 function formatChatTime(iso) {
   if (!iso) return ''
-  const d = new Date(iso), now = new Date()
+  let input = iso
+  if (typeof iso === 'string' && !iso.endsWith('Z') && !iso.includes('+')) {
+    if (iso.includes('T')) {
+      input = iso + 'Z'
+    }
+  }
+  const d = new Date(input), now = new Date()
   const dd = Math.floor((now - d) / 86400000)
   if (dd === 0) return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
   if (dd === 1) return 'Yesterday'
@@ -999,6 +1005,10 @@ export default function Messages() {
   const [searchContact, setSearchContact] = useState('')
   const [loadingContacts, setLoadingContacts] = useState(true)
   const [loadingMessages, setLoadingMessages] = useState(false)
+  const [loadingMoreMsgs, setLoadingMoreMsgs] = useState(false)
+  const [msgPage, setMsgPage] = useState(1)
+  const [hasMoreMsgs, setHasMoreMsgs] = useState(false)
+  const extraPagesRef = useRef(false)
   const [newMessage, setNewMessage] = useState('')
   const [lastMessages, setLastMessages] = useState({})
   const [profilePics, setProfilePics] = useState({})
@@ -1162,21 +1172,59 @@ export default function Messages() {
 
   const fetchMessages = useCallback(async () => {
     if (!selectedContact) return
-    setLoadingMessages(true)
+    if (!extraPagesRef.current) setLoadingMessages(true)
     try {
-      const res = await messagesApi.getAll({ contact_id: selectedContact.id, limit: 150 })
-      const sorted = [...(res.data?.messages || res.data || [])].sort(
+      const res = await messagesApi.getAll({ contact_id: selectedContact.id, limit: 50, page: 1 })
+      const batch = [...(res.data?.messages || res.data || [])].sort(
         (a, b) => new Date(a.created_at) - new Date(b.created_at)
       )
-      setMessages(sorted)
-      if (sorted.length > 0) {
-        const last = sorted[sorted.length - 1]
+      setHasMoreMsgs(batch.length >= 50)
+
+      if (extraPagesRef.current) {
+        // Merge: only add messages not already displayed (keeps older pages intact)
+        setMessages(prev => {
+          const existingIds = new Set(prev.map(m => m.id))
+          const newMsgs = batch.filter(m => !existingIds.has(m.id))
+          if (newMsgs.length === 0) return prev
+          return [...prev, ...newMsgs].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+        })
+      } else {
+        setMessages(batch)
+      }
+
+      if (batch.length > 0) {
+        const last = batch[batch.length - 1]
         setLastMessages(prev => ({ ...prev, [selectedContact.id]: { content: last.content, time: last.created_at, direction: last.direction } }))
       }
       setUnreadContacts(prev => { const n = new Set(prev); n.delete(selectedContact.id); return n })
-    } catch { setMessages([]) }
+    } catch { if (!extraPagesRef.current) setMessages([]) }
     finally { setLoadingMessages(false) }
   }, [selectedContact])
+
+  const loadEarlierMessages = useCallback(async () => {
+    if (!selectedContact || loadingMoreMsgs) return
+    const nextPage = msgPage + 1
+    setLoadingMoreMsgs(true)
+    try {
+      const res = await messagesApi.getAll({ contact_id: selectedContact.id, limit: 50, page: nextPage })
+      const batch = [...(res.data?.messages || res.data || [])].sort(
+        (a, b) => new Date(a.created_at) - new Date(b.created_at)
+      )
+      if (batch.length > 0) {
+        extraPagesRef.current = true
+        setMsgPage(nextPage)
+        setHasMoreMsgs(batch.length >= 50)
+        setMessages(prev => {
+          const existingIds = new Set(prev.map(m => m.id))
+          const newBatch = batch.filter(m => !existingIds.has(m.id))
+          return newBatch.length > 0 ? [...newBatch, ...prev] : prev
+        })
+      } else {
+        setHasMoreMsgs(false)
+      }
+    } catch {}
+    finally { setLoadingMoreMsgs(false) }
+  }, [selectedContact, msgPage, loadingMoreMsgs])
 
   const pollInbound = useCallback(async () => {
     if (sessionStatus.status !== 'connected') return
@@ -1221,7 +1269,14 @@ export default function Messages() {
   useEffect(() => { fetchContacts(); preloadLastMessages() }, [])
   // Refetch when background sync completes so new contacts appear immediately
   useEffect(() => { if (syncedAt > 0) { fetchContacts(); preloadLastMessages() } }, [syncedAt]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchMessages(); const iv = setInterval(fetchMessages, 5000); return () => clearInterval(iv) }, [selectedContact])
+  useEffect(() => {
+    setMsgPage(1)
+    setHasMoreMsgs(false)
+    extraPagesRef.current = false
+    fetchMessages()
+    const iv = setInterval(fetchMessages, 5000)
+    return () => clearInterval(iv)
+  }, [selectedContact])
   useEffect(() => {
     if (sessionStatus.status !== 'connected') return
     pollInbound(); const iv = setInterval(pollInbound, 8000); return () => clearInterval(iv)
@@ -1683,7 +1738,18 @@ export default function Messages() {
           {/* Chat list */}
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {loadingContacts && bridgeChats.length === 0 ? (
-              <div style={{ padding: 32, textAlign: 'center', color: '#8696a0', fontSize: 13 }}>Loading chats...</div>
+              <div style={{ padding: '8px 0' }}>
+                <style>{`@keyframes skpulse{0%,100%{opacity:0.3}50%{opacity:0.7}}`}</style>
+                {[...Array(9)].map((_, i) => (
+                  <div key={i} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 16px', borderBottom:'1px solid #1e2a30' }}>
+                    <div style={{ width:46, height:46, borderRadius:'50%', background:'#202c33', flexShrink:0, animation:'skpulse 1.5s ease-in-out infinite' }} />
+                    <div style={{ flex:1 }}>
+                      <div style={{ height:13, background:'#202c33', borderRadius:4, width:`${50+i*5}%`, marginBottom:8, animation:'skpulse 1.5s ease-in-out infinite' }} />
+                      <div style={{ height:11, background:'#1a2530', borderRadius:4, width:`${65+i*3}%`, animation:'skpulse 1.5s ease-in-out infinite' }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : filteredChats.length === 0 ? (
               <div style={{ padding: 24, textAlign: 'center', color: '#8696a0', fontSize: 13 }}>
                 {displayChats.length === 0 ? (
@@ -1885,12 +1951,33 @@ export default function Messages() {
               {/* Messages Body */}
               <div style={{ flex: 1, overflowY: 'auto', padding: '16px 6%', display: 'flex', flexDirection: 'column', gap: 2, background: '#0b141a' }}>
                 {loadingMessages && messages.length === 0 ? (
-                  <div style={{ margin: 'auto', color: '#8696a0', fontSize: 13 }}>Loading messages...</div>
+                  <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                    <style>{`@keyframes skpulse{0%,100%{opacity:0.3}50%{opacity:0.7}}`}</style>
+                    {[...Array(7)].map((_, i) => (
+                      <div key={i} style={{ display:'flex', justifyContent: i%2===0 ? 'flex-start' : 'flex-end', marginTop: i===0 ? 8 : 0 }}>
+                        <div style={{ height:38, width:`${160+(i*29)%130}px`, background: i%2===0 ? '#202c33' : '#00453a', borderRadius:8, animation:'skpulse 1.5s ease-in-out infinite' }} />
+                      </div>
+                    ))}
+                  </div>
                 ) : messages.length === 0 ? (
                   <div style={{ margin: 'auto', textAlign: 'center', color: '#8696a0' }}>
                     <div style={{ background: '#182229', borderRadius: 8, padding: '10px 20px', fontSize: 13 }}>No messages yet — send one below!</div>
                   </div>
-                ) : (searchMsg ? messages.filter(m => parseContent(m.content).text?.toLowerCase().includes(searchMsg.toLowerCase())) : messages).map((m, idx, arr) => {
+                ) : (
+                  <>
+                    {/* Load earlier messages button */}
+                    {hasMoreMsgs && (
+                      <div style={{ textAlign: 'center', padding: '8px 0 4px' }}>
+                        <button
+                          onClick={loadEarlierMessages}
+                          disabled={loadingMoreMsgs}
+                          style={{ background: '#182229', border: '1px solid #2a3942', borderRadius: 20, padding: '6px 18px', color: loadingMoreMsgs ? '#54656f' : '#8696a0', cursor: loadingMoreMsgs ? 'default' : 'pointer', fontSize: 12, transition: 'all 0.2s' }}
+                        >
+                          {loadingMoreMsgs ? '...' : '↑ Load earlier messages'}
+                        </button>
+                      </div>
+                    )}
+                    {(searchMsg ? messages.filter(m => parseContent(m.content).text?.toLowerCase().includes(searchMsg.toLowerCase())) : messages).map((m, idx, arr) => {
                   const isOut = m.direction === 'outbound'
                   const prevMsg = arr[idx - 1]
                   const showDate = !prevMsg || new Date(m.created_at).toDateString() !== new Date(prevMsg.created_at).toDateString()
@@ -1918,6 +2005,8 @@ export default function Messages() {
                     </div>
                   )
                 })}
+                  </>
+                )}
                 <div ref={chatEndRef} />
               </div>
 
