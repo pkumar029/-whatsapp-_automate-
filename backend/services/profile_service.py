@@ -62,12 +62,14 @@ def fetch_and_save_profile(db: Session, wa_account: str, user_id: Optional[int] 
     """
     import httpx
     bridge_data = None
-    try:
-        r = httpx.get("http://localhost:7002/my-profile", timeout=10.0)
-        if r.status_code == 200:
-            bridge_data = r.json()
-    except Exception as e:
-        logger.warning(f"fetch_and_save_profile: bridge unreachable — {e}")
+    if user_id is not None:
+        from services.whatsapp_service import bridge_url
+        try:
+            r = httpx.get(bridge_url(user_id, "/my-profile"), timeout=10.0)
+            if r.status_code == 200:
+                bridge_data = r.json()
+        except Exception as e:
+            logger.warning(f"fetch_and_save_profile: bridge unreachable — {e}")
 
     if bridge_data and bridge_data.get("success"):
         profile = upsert_whatsapp_profile(

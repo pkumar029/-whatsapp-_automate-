@@ -48,8 +48,9 @@ export const whatsappApi = {
   sendMessage: (data) => api.post('/whatsapp/send', data),
   getQR: () => api.get('/whatsapp/qr'),
   getProfile: () => api.get('/whatsapp/profile'),
-  // URL for EventSource — not an axios call
-  eventsUrl: () => `${BASE_URL}/whatsapp/events`,
+  // Public SSE endpoint (EventSource can't send auth headers) — backend
+  // requires user_id as a query param instead.
+  eventsUrl: (userId) => `${BASE_URL}/whatsapp/events?user_id=${userId}`,
 }
 
 // ─── Contacts API ─────────────────────────────────────────────

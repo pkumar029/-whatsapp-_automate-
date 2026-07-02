@@ -7,7 +7,7 @@ const AppContext = createContext()
 export function AppProvider({ children }) {
   // /whatsapp/status and /whatsapp/events are now scoped to the logged-in
   // user — don't poll/connect either until a real session exists.
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, user } = useAuth()
   // ─── Theme ──────────────────────────────────────────────────
   const [theme, setThemeState] = useState(() => localStorage.getItem('wa_theme') || 'dark')
 
@@ -173,7 +173,7 @@ export function AppProvider({ children }) {
   // Stays alive for the full app session. Provides instant detection of
   // connected / disconnected / qr events without waiting for the 8 s poll.
   useEffect(() => {
-    if (!isAuthenticated) return
+    if (!isAuthenticated || !user) return
     let es = null
     let reconnectTimer = null
     let cancelled = false
@@ -181,7 +181,7 @@ export function AppProvider({ children }) {
     const connect = () => {
       if (cancelled) return
       try {
-        es = new EventSource(whatsappApi.eventsUrl())
+        es = new EventSource(whatsappApi.eventsUrl(user.id))
       } catch {
         reconnectTimer = setTimeout(connect, 8000)
         return
@@ -221,7 +221,7 @@ export function AppProvider({ children }) {
       if (es) { try { es.close() } catch {} }
       clearTimeout(reconnectTimer)
     }
-  }, [isAuthenticated])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, user])  // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <AppContext.Provider value={{

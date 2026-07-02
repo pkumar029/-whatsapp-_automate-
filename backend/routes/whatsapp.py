@@ -4,12 +4,13 @@ WhatsApp Routes — Connect, disconnect, status, send message
 import asyncio
 import json
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, Query
 from fastapi.responses import StreamingResponse
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from database.connection import get_db
 from services import whatsapp_service
+from services.whatsapp_service import bridge_url
 from models.schemas import WhatsAppSendRequest, WhatsAppStatusResponse, WhatsAppConnectResponse, WhatsAppConnectRequest
 from dependencies import current_user_id
 
@@ -23,15 +24,18 @@ async def get_status(db: Session = Depends(get_db), user_id: int = Depends(curre
 
 
 @router.get("/events")
-async def whatsapp_events(request: Request):
+async def whatsapp_events(request: Request, user_id: int = Query(...)):
     """SSE stream — proxies real-time bridge events so the frontend login flow
-    gets instant QR, connected, and disconnected notifications without polling."""
+    gets instant QR, connected, and disconnected notifications without polling.
+    Public (EventSource can't send auth headers), so user_id is passed as a
+    query param — this session-scoped route only exposes this one user's own
+    bridge events now that the bridge supports concurrent sessions."""
 
     async def generator():
         # Send current bridge state immediately on connect
         try:
             async with httpx.AsyncClient(timeout=3.0) as hc:
-                r = await hc.get("http://localhost:7002/status")
+                r = await hc.get(bridge_url(user_id, "/status"))
                 if r.status_code == 200:
                     d = r.json()
                     yield f"data: {json.dumps({'type': 'status', 'bridge_status': d.get('status'), 'qr': d.get('qr'), 'phone': d.get('phone'), 'pairing_code': d.get('pairing_code')})}\n\n"
@@ -42,7 +46,7 @@ async def whatsapp_events(request: Request):
         bridge_sse_ok = False
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=3.0)) as hc:
-                async with hc.stream("GET", "http://localhost:7002/events") as stream:
+                async with hc.stream("GET", bridge_url(user_id, "/events")) as stream:
                     bridge_sse_ok = True
                     async for line in stream.aiter_lines():
                         if await request.is_disconnected():
@@ -60,7 +64,7 @@ async def whatsapp_events(request: Request):
                 await asyncio.sleep(1.5)
                 try:
                     async with httpx.AsyncClient(timeout=3.0) as hc:
-                        r = await hc.get("http://localhost:7002/status")
+                        r = await hc.get(bridge_url(user_id, "/status"))
                         if r.status_code == 200:
                             d = r.json()
                             payload = json.dumps({
@@ -104,10 +108,10 @@ async def disconnect(db: Session = Depends(get_db), user_id: int = Depends(curre
 
 
 @router.post("/clear-session")
-async def clear_session():
+async def clear_session(user_id: int = Depends(current_user_id)):
     """Wipe the bridge's saved WhatsApp session so the next connect requires a new QR/pairing.
     Only call this when the user explicitly wants to switch to a different WhatsApp number."""
-    return whatsapp_service.clear_bridge_session()
+    return whatsapp_service.clear_bridge_session(user_id)
 
 
 @router.get("/profile")
@@ -161,25 +165,37 @@ class WebhookPayload(BaseModel):
     name: Optional[str] = None
     tags: Optional[List[str]] = None
     messageId: Optional[str] = None
+    userId: Optional[str] = None  # bridge sends its session key — the owning app user's id
 
 @router.post("/webhook")
 async def whatsapp_webhook(payload: WebhookPayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Receive inbound messages from WhatsApp bridge.
 
     Called by the Node bridge itself, not an authenticated browser — there's
-    no JWT here. Until Phase 3 (per-user bridge sessions) lands, only one
-    user can be genuinely connected via the bridge at a time, so "the"
-    connected session IS the message's owner. That owner's user_id is then
-    threaded through contact/message creation and automation matching so
-    nothing here leaks across users even once multiple sessions exist.
+    no JWT here. The bridge now runs one isolated session per user (Phase 3),
+    so it tells us directly which user this message belongs to via userId
+    instead of us having to guess "the" connected session. Falls back to the
+    old single-session heuristic only if an older bridge build omits userId.
     """
     try:
         phone = payload.phone
         content = payload.content
 
-        active_session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
-        owner_user_id = active_session.user_id if active_session else None
-        wa_account = active_session.phone if active_session else None
+        owner_user_id = None
+        wa_account = None
+        if payload.userId is not None:
+            try:
+                owner_user_id = int(payload.userId)
+            except ValueError:
+                owner_user_id = None
+            if owner_user_id is not None:
+                owning_session = db.query(WhatsappSession).filter(WhatsappSession.user_id == owner_user_id).first()
+                wa_account = owning_session.phone if owning_session else None
+
+        if owner_user_id is None:
+            active_session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
+            owner_user_id = active_session.user_id if active_session else None
+            wa_account = active_session.phone if active_session else None
 
         if owner_user_id is None:
             logger.warning(f"Webhook message from {phone} dropped — no connected WhatsApp session to attribute it to")

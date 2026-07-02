@@ -234,19 +234,19 @@ def sync_whatsapp_contacts(db: Session, user_id: int, progress_callback: Optiona
 
     if connection_type == "bridge":
         import httpx
-        from config.settings import settings as _cfg
+        from services.whatsapp_service import bridge_url as _wa_bridge_url
 
         wa_account = session.phone or ""
 
         # 1. Try streaming sync (has live progress)
         try:
-            return _sync_via_stream(db, wa_account, user_id, _cfg.BRIDGE_URL, progress_callback)
+            return _sync_via_stream(db, wa_account, user_id, progress_callback)
         except Exception as stream_err:
             logger.warning(f"Stream sync failed ({stream_err}), falling back to /contacts")
 
         # 2. Fallback: plain /contacts endpoint
         try:
-            r = httpx.get(f"{_cfg.BRIDGE_URL}/contacts", timeout=90.0)
+            r = httpx.get(_wa_bridge_url(user_id, "/contacts"), timeout=90.0)
             if r.status_code != 200:
                 raise Exception(f"Bridge returned {r.status_code}: {r.text[:200]}")
             wa_contacts = r.json().get("contacts", [])
@@ -273,17 +273,17 @@ def _sync_via_stream(
     db: Session,
     wa_account: str,
     user_id: int,
-    bridge_url: str,
     progress_callback: Optional[Callable],
 ) -> dict:
     """Sync contacts using the bridge SSE stream endpoint for live progress."""
     import httpx
+    from services.whatsapp_service import bridge_url as _wa_bridge_url
 
     all_contacts: list[dict] = []
     total = 0
 
     with httpx.Client(timeout=httpx.Timeout(180.0, connect=5.0)) as hc:
-        with hc.stream("GET", f"{bridge_url}/contacts/sync-stream") as stream:
+        with hc.stream("GET", _wa_bridge_url(user_id, "/contacts/sync-stream")) as stream:
             stream.raise_for_status()
             for raw_line in stream.iter_lines():
                 line = raw_line.strip()

@@ -5,27 +5,32 @@ const QRCode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
 
-function removeSessionLockfile() {
-    const lockfilePath = path.join(__dirname, '.wwebjs_auth', 'session', 'lockfile');
+// LocalAuth with a clientId stores its profile under `<dataPath>/session-<clientId>`.
+function sessionDir(userId) {
+    return path.join(__dirname, '.wwebjs_auth', `session-${userId}`);
+}
+
+function removeSessionLockfile(userId) {
+    const lockfilePath = path.join(sessionDir(userId), 'lockfile');
     try {
         if (fs.existsSync(lockfilePath)) {
             fs.unlinkSync(lockfilePath);
-            console.log('Deleted session lockfile successfully.');
+            console.log(`Deleted session lockfile for user ${userId}.`);
         }
     } catch (err) {
-        console.warn('Failed to delete session lockfile:', err.message);
+        console.warn(`Failed to delete session lockfile for user ${userId}:`, err.message);
     }
 }
 
-function clearSessionFiles() {
-    const sessionDir = path.join(__dirname, '.wwebjs_auth');
+function clearSessionFiles(userId) {
+    const dir = sessionDir(userId);
     try {
-        if (fs.existsSync(sessionDir)) {
-            fs.rmSync(sessionDir, { recursive: true, force: true });
-            console.log('Cleared WhatsApp session files — next connect will require fresh QR/pairing.');
+        if (fs.existsSync(dir)) {
+            fs.rmSync(dir, { recursive: true, force: true });
+            console.log(`Cleared WhatsApp session files for user ${userId} — next connect will require fresh QR/pairing.`);
         }
     } catch (err) {
-        console.warn('Failed to clear session files:', err.message);
+        console.warn(`Failed to clear session files for user ${userId}:`, err.message);
     }
 }
 
@@ -48,20 +53,45 @@ const PORT = process.env.PORT || 7002;
 app.use(cors());
 app.use(express.json());
 
-let client = null;
-let clientStatus = 'disconnected'; // disconnected, connecting, connected, error
-let qrCodeBase64 = null;
-let connectedPhone = null;
-let pairingCode = null;
-let lastError = null;
-let currentLinkMethod = 'qr';
+// ─── Per-user session state ────────────────────────────────────
+// Each connected user gets their own whatsapp-web.js Client (own Chromium
+// process via puppeteer) and own LocalAuth folder — this is what makes
+// multiple users' WhatsApp accounts connectable at the same time instead
+// of the old single-global-client design.
+const sessions = new Map(); // userId (string) -> session state object
 
-// ─── SSE broadcasting ─────────────────────────────────────────
-let sseClients = [];
+function getSession(userId) {
+    const key = String(userId);
+    if (!sessions.has(key)) {
+        sessions.set(key, {
+            userId: key,
+            client: null,
+            clientStatus: 'disconnected', // disconnected, connecting, connected, error
+            qrCodeBase64: null,
+            connectedPhone: null,
+            pairingCode: null,
+            lastError: null,
+            currentLinkMethod: 'qr',
+            sseClients: [],
+        });
+    }
+    return sessions.get(key);
+}
 
-function pushEvent(type, extra = {}) {
+// Resolves :userId on every /session/:userId/* route into req.wa before the
+// handler runs, so route handlers never touch module-level state.
+function sessionMiddleware(req, res, next) {
+    if (!req.params.userId) {
+        return res.status(400).json({ success: false, error: 'userId is required' });
+    }
+    req.wa = getSession(req.params.userId);
+    next();
+}
+
+// ─── SSE broadcasting (per session) ────────────────────────────
+function pushEvent(session, type, extra = {}) {
     const payload = JSON.stringify({ type, ...extra });
-    sseClients = sseClients.filter(res => {
+    session.sseClients = session.sseClients.filter(res => {
         try { res.write(`data: ${payload}\n\n`); return true; }
         catch (_) { return false; }
     });
@@ -76,39 +106,39 @@ function logAuthEvent(event, details = {}) {
     console.log(JSON.stringify({ ts: new Date().toISOString(), event, ...details }));
 }
 
-// True only when the WhatsApp client AND its Puppeteer browser page are alive.
-// client.pupPage can be null even when clientStatus === 'connected' if the
-// browser process crashed — guard every API handler with this.
-function isClientReady() {
-    return clientStatus === 'connected' && client != null && client.pupPage != null;
+// True only when this user's WhatsApp client AND its Puppeteer browser page
+// are alive. client.pupPage can be null even when clientStatus === 'connected'
+// if the browser process crashed — guard every API handler with this.
+function isClientReady(session) {
+    return session.clientStatus === 'connected' && session.client != null && session.client.pupPage != null;
 }
 
 // Called from catch blocks when an "evaluate" / pupPage error is detected.
 // Marks the client as disconnected so the next guard check returns false.
-function handleClientCrash(err) {
+function handleClientCrash(session, err) {
     if (err && err.message && (
         err.message.includes('evaluate') ||
         err.message.includes('pupPage') ||
         err.message.includes('Target closed') ||
         err.message.includes('Session closed')
     )) {
-        console.warn('[bridge] Puppeteer page crash detected — resetting client status to disconnected');
-        clientStatus = 'disconnected';
-        client = null;
+        console.warn(`[bridge] Puppeteer page crash detected for user ${session.userId} — resetting client status to disconnected`);
+        session.clientStatus = 'disconnected';
+        session.client = null;
     }
 }
 
-// Initialize WhatsApp client
-async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
-    currentLinkMethod = linkMethod;
+// Initialize this user's WhatsApp client
+async function initClient(session, phoneForPairingCode = null, linkMethod = 'qr') {
+    session.currentLinkMethod = linkMethod;
     const expectedPhone = phoneForPairingCode ? phoneForPairingCode.replace(/\D/g, '') : null;
 
-    if (client) {
-        logAuthEvent('session_replaced', { message: 'Session already exists. Creating a new session...' });
-        pushEvent('info', { message: '❌ Session already exists. Creating a new session...' });
+    if (session.client) {
+        logAuthEvent('session_replaced', { userId: session.userId, message: 'Session already exists. Creating a new session...' });
+        pushEvent(session, 'info', { message: '❌ Session already exists. Creating a new session...' });
         try {
-            console.log('Destroying existing client browser session...');
-            await client.destroy();
+            console.log(`Destroying existing client browser session for user ${session.userId}...`);
+            await session.client.destroy();
             console.log('Existing client destroyed.');
         } catch (e) {
             console.error('Error destroying client:', e);
@@ -116,22 +146,22 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
     }
 
     // Clean lock file before restarting to prevent EBUSY/locked session folder errors
-    removeSessionLockfile();
+    removeSessionLockfile(session.userId);
 
-    clientStatus = 'connecting';
-    qrCodeBase64 = null;
-    connectedPhone = null;
-    pairingCode = null;
-    lastError = null;
+    session.clientStatus = 'connecting';
+    session.qrCodeBase64 = null;
+    session.connectedPhone = null;
+    session.pairingCode = null;
+    session.lastError = null;
 
     const sessionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    logAuthEvent('session_created', { sessionId, phone: phoneForPairingCode || null, linkMethod });
+    logAuthEvent('session_created', { userId: session.userId, sessionId, phone: phoneForPairingCode || null, linkMethod });
 
-    console.log('Initializing whatsapp-web.js client...');
+    console.log(`Initializing whatsapp-web.js client for user ${session.userId}...`);
     if (phoneForPairingCode) {
         console.log(`Client will request Pairing Code / verify login for: ${phoneForPairingCode} using method: ${linkMethod}`);
     }
-    
+
     // Detect system Chrome/Chromium across Windows, Linux (Pi), macOS
     const chromiumPaths = [
         // Windows — Chrome
@@ -154,8 +184,9 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
     if (executablePath) console.log(`Using system browser: ${executablePath}`);
     else console.log('Using Puppeteer bundled Chromium');
 
-    client = new Client({
+    const client = new Client({
         authStrategy: new LocalAuth({
+            clientId: session.userId,
             dataPath: './.wwebjs_auth'
         }),
         puppeteer: {
@@ -164,15 +195,16 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
             args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
         }
     });
+    session.client = client;
 
     client.on('qr', async (qr) => {
-        console.log('QR Code received, converting to base64...');
+        console.log(`QR Code received for user ${session.userId}, converting to base64...`);
         try {
             // Convert QR code to base64 image URL (PNG)
             const qrDataUrl = await QRCode.toDataURL(qr);
             // Extract the base64 part of the data URL (remove "data:image/png;base64,")
-            qrCodeBase64 = qrDataUrl.split(',')[1];
-            clientStatus = 'connecting';
+            session.qrCodeBase64 = qrDataUrl.split(',')[1];
+            session.clientStatus = 'connecting';
 
             // Generate pairing code if phone number and otp method are specified (regenerate on QR refreshes)
             if (linkMethod === 'otp' && phoneForPairingCode) {
@@ -184,32 +216,32 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
                     }
                     const code = await client.requestPairingCode(cleanPhone);
                     // Format pairing code beautifully (e.g. ABCD-EFGH)
-                    pairingCode = code ? (code.substring(0, 4) + '-' + code.substring(4)) : code;
-                    console.log(`Pairing code received: ${pairingCode}`);
-                    lastError = null;
+                    session.pairingCode = code ? (code.substring(0, 4) + '-' + code.substring(4)) : code;
+                    console.log(`Pairing code received: ${session.pairingCode}`);
+                    session.lastError = null;
                 } catch (codeErr) {
                     console.error('Error generating pairing code:', codeErr);
-                    lastError = `Failed to generate pairing code: ${codeErr.message}`;
+                    session.lastError = `Failed to generate pairing code: ${codeErr.message}`;
                 }
             }
 
-            logAuthEvent('qr_generated', { sessionId, pairingCode: !!pairingCode });
+            logAuthEvent('qr_generated', { userId: session.userId, sessionId, pairingCode: !!session.pairingCode });
 
             // Push QR to all SSE listeners instantly
-            pushEvent('qr_ready', { qr: qrCodeBase64, pairing_code: pairingCode });
+            pushEvent(session, 'qr_ready', { qr: session.qrCodeBase64, pairing_code: session.pairingCode });
         } catch (err) {
             console.error('Failed to generate QR base64:', err);
         }
     });
 
     client.on('ready', async () => {
-        console.log('WhatsApp Client is ready!');
+        console.log(`WhatsApp Client is ready for user ${session.userId}!`);
         const actualPhone = (client.info && client.info.wid) ? client.info.wid.user : (client.info ? client.info.phone : expectedPhone);
 
         // Security Verification: Ensure actual connected phone number matches expected phone number
         const shouldVerify = expectedPhone &&
                              actualPhone &&
-                             currentLinkMethod !== 'qr' &&
+                             session.currentLinkMethod !== 'qr' &&
                              expectedPhone.length >= 8;
         if (shouldVerify) {
             const cleanActual = actualPhone.replace(/\D/g, '');
@@ -218,13 +250,13 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
                             expectedPhone.endsWith(cleanActual);
             if (!isMatch) {
                 console.error(`Security alert: Connected phone number (${cleanActual}) does not match expected phone number (${expectedPhone}). Logging out...`);
-                clientStatus = 'disconnected';
-                qrCodeBase64 = null;
-                pairingCode = null;
-                connectedPhone = null;
-                lastError = `Security Verification Failed: Connected account (${cleanActual}) does not match the requested phone number (${expectedPhone}).`;
-                logAuthEvent('auth_failed', { sessionId, reason: lastError });
-                pushEvent('error', { message: lastError });
+                session.clientStatus = 'disconnected';
+                session.qrCodeBase64 = null;
+                session.pairingCode = null;
+                session.connectedPhone = null;
+                session.lastError = `Security Verification Failed: Connected account (${cleanActual}) does not match the requested phone number (${expectedPhone}).`;
+                logAuthEvent('auth_failed', { userId: session.userId, sessionId, reason: session.lastError });
+                pushEvent(session, 'error', { message: session.lastError });
                 try {
                     await client.logout();
                     await client.destroy();
@@ -234,43 +266,43 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
                         await client.destroy();
                     } catch (dErr) {}
                 }
-                client = null;
+                session.client = null;
                 return;
             }
         }
 
-        clientStatus = 'connected';
-        qrCodeBase64 = null;
-        pairingCode = null;
-        connectedPhone = actualPhone;
-        logAuthEvent('auth_success', { sessionId, phone: connectedPhone });
-        pushEvent('connected', { phone: connectedPhone });
+        session.clientStatus = 'connected';
+        session.qrCodeBase64 = null;
+        session.pairingCode = null;
+        session.connectedPhone = actualPhone;
+        logAuthEvent('auth_success', { userId: session.userId, sessionId, phone: session.connectedPhone });
+        pushEvent(session, 'connected', { phone: session.connectedPhone });
     });
 
     client.on('authenticated', () => {
-        console.log('WhatsApp Client authenticated.');
-        logAuthEvent('qr_scanned', { sessionId });
-        pushEvent('authenticated');
+        console.log(`WhatsApp Client authenticated for user ${session.userId}.`);
+        logAuthEvent('qr_scanned', { userId: session.userId, sessionId });
+        pushEvent(session, 'authenticated');
     });
 
     client.on('auth_failure', (msg) => {
         console.error('Authentication failure:', msg);
-        clientStatus = 'disconnected';
-        lastError = `Auth failure: ${msg}`;
-        qrCodeBase64 = null;
-        pairingCode = null;
-        logAuthEvent('auth_failed', { sessionId, reason: msg });
-        pushEvent('error', { message: lastError });
+        session.clientStatus = 'disconnected';
+        session.lastError = `Auth failure: ${msg}`;
+        session.qrCodeBase64 = null;
+        session.pairingCode = null;
+        logAuthEvent('auth_failed', { userId: session.userId, sessionId, reason: msg });
+        pushEvent(session, 'error', { message: session.lastError });
     });
 
     client.on('disconnected', (reason) => {
-        console.log('Client was logged out or disconnected:', reason);
-        clientStatus = 'disconnected';
-        connectedPhone = null;
-        qrCodeBase64 = null;
-        pairingCode = null;
-        logAuthEvent(reason === 'LOGOUT' ? 'logout' : 'session_expired', { sessionId, reason });
-        pushEvent('disconnected', { reason });
+        console.log(`Client was logged out or disconnected for user ${session.userId}:`, reason);
+        session.clientStatus = 'disconnected';
+        session.connectedPhone = null;
+        session.qrCodeBase64 = null;
+        session.pairingCode = null;
+        logAuthEvent(reason === 'LOGOUT' ? 'logout' : 'session_expired', { userId: session.userId, sessionId, reason });
+        pushEvent(session, 'disconnected', { reason });
     });
 
     client.on('message', async (msg) => {
@@ -302,14 +334,17 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
                 }
             }
 
-            console.log(`Inbound message from ${name} (${phone}): ${msg.body}`);
+            console.log(`Inbound message from ${name} (${phone}) for user ${session.userId}: ${msg.body}`);
             const content = msg.body;
             const messageId = msg.id._serialized;
-            
+
+            // userId identifies the owning app user directly — the backend no
+            // longer needs to guess "the" connected session now that multiple
+            // sessions can be connected at once.
             await fetch('http://localhost:7001/api/v1/whatsapp/webhook', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phone, content, name, tags, messageId })
+                body: JSON.stringify({ userId: session.userId, phone, content, name, tags, messageId })
             });
         } catch (err) {
             console.error('Failed to forward inbound message to webhook:', err.message);
@@ -318,27 +353,61 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
 
     client.initialize().catch(err => {
         console.error('Initialization error:', err);
-        clientStatus = 'disconnected';
-        lastError = err.message;
-        pairingCode = null;
-        logAuthEvent('auth_failed', { sessionId, reason: err.message });
-        pushEvent('error', { message: `❌ Unable to connect to WhatsApp. Please try again. (${err.message})` });
+        session.clientStatus = 'disconnected';
+        session.lastError = err.message;
+        session.pairingCode = null;
+        logAuthEvent('auth_failed', { userId: session.userId, sessionId, reason: err.message });
+        pushEvent(session, 'error', { message: `❌ Unable to connect to WhatsApp. Please try again. (${err.message})` });
     });
 }
 
-// REST Endpoints
-app.get('/status', (req, res) => {
+// Resolve a phone number or stored JID to a sendable WhatsApp JID.
+// Handles @c.us stored in DB, raw numbers, @g.us groups, and @lid multi-device contacts.
+async function resolveJid(session, phone) {
+    // Groups / broadcast / status — pass through unchanged
+    if (phone.includes('@g.us') || phone.includes('@broadcast') || phone.includes('@newsletter')) {
+        return phone;
+    }
+
+    // Strip any @c.us or @lid suffix stored in the DB so we get just the number
+    let raw = phone.replace(/@\S+$/, '').replace(/[+\s\-()]/g, '');
+
+    // Automatically prepend Indian country code '91' for 10-digit numbers
+    if (raw.length === 10) {
+        raw = '91' + raw;
+    }
+
+    try {
+        const numberId = await session.client.getNumberId(raw);
+        if (numberId && numberId._serialized) {
+            return numberId._serialized;
+        }
+    } catch (_) { /* fall through to @c.us default */ }
+
+    return `${raw}@c.us`;
+}
+
+// ─── REST Endpoints ─────────────────────────────────────────────
+// Every session-scoped route lives under /session/:userId/* — the backend
+// (which knows the caller's identity from their JWT) supplies :userId as an
+// opaque key; the bridge itself has no concept of app-level auth.
+const sessionRouter = express.Router({ mergeParams: true });
+app.use('/session/:userId', sessionMiddleware, sessionRouter);
+
+sessionRouter.get('/status', (req, res) => {
+    const s = req.wa;
     res.json({
-        status: clientStatus,
-        qr: qrCodeBase64,
-        phone: connectedPhone,
-        pairing_code: pairingCode,
-        error: lastError
+        status: s.clientStatus,
+        qr: s.qrCodeBase64,
+        phone: s.connectedPhone,
+        pairing_code: s.pairingCode,
+        error: s.lastError
     });
 });
 
 // SSE stream — pushes real-time events to listeners (frontend login flow)
-app.get('/events', (req, res) => {
+sessionRouter.get('/events', (req, res) => {
+    const s = req.wa;
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -348,52 +417,54 @@ app.get('/events', (req, res) => {
     // Send current state immediately so the client knows where things stand
     const snapshot = JSON.stringify({
         type: 'status',
-        bridge_status: clientStatus,
-        qr: qrCodeBase64,
-        phone: connectedPhone,
-        pairing_code: pairingCode,
+        bridge_status: s.clientStatus,
+        qr: s.qrCodeBase64,
+        phone: s.connectedPhone,
+        pairing_code: s.pairingCode,
     });
     res.write(`data: ${snapshot}\n\n`);
 
-    sseClients.push(res);
+    s.sseClients.push(res);
     req.on('close', () => {
-        sseClients = sseClients.filter(c => c !== res);
+        s.sseClients = s.sseClients.filter(c => c !== res);
     });
 });
 
-app.post('/connect', async (req, res) => {
-    if (clientStatus === 'connected') {
-        return res.json({ success: true, message: 'Already connected', phone: connectedPhone });
+sessionRouter.post('/connect', async (req, res) => {
+    const s = req.wa;
+    if (s.clientStatus === 'connected') {
+        return res.json({ success: true, message: 'Already connected', phone: s.connectedPhone });
     }
     const { phone, linkMethod } = req.body;
-    await initClient(phone, linkMethod);
+    await initClient(s, phone, linkMethod);
     res.json({ success: true, message: 'Initialization started' });
 });
 
-app.post('/disconnect', async (req, res) => {
-    logAuthEvent('logout', { requested: true });
-    if (!client) {
-        clientStatus = 'disconnected';
+sessionRouter.post('/disconnect', async (req, res) => {
+    const s = req.wa;
+    logAuthEvent('logout', { userId: s.userId, requested: true });
+    if (!s.client) {
+        s.clientStatus = 'disconnected';
         return res.json({ success: true, message: 'No client session to disconnect' });
     }
 
     try {
-        console.log('Disconnecting/Logging out client...');
-        if (clientStatus === 'connected') {
-            await client.logout();
+        console.log(`Disconnecting/Logging out client for user ${s.userId}...`);
+        if (s.clientStatus === 'connected') {
+            await s.client.logout();
         }
-        await client.destroy();
+        await s.client.destroy();
     } catch (e) {
         console.warn('Error during logout/destroy:', e);
         try {
-            await client.destroy();
+            await s.client.destroy();
         } catch (ee) {}
     }
 
-    client = null;
-    clientStatus = 'disconnected';
-    qrCodeBase64 = null;
-    connectedPhone = null;
+    s.client = null;
+    s.clientStatus = 'disconnected';
+    s.qrCodeBase64 = null;
+    s.connectedPhone = null;
     // Session files are intentionally kept so the same account can reconnect without a new QR.
     // Call POST /clear-session explicitly when switching to a different WhatsApp number.
     res.json({ success: true, message: 'Client disconnected successfully' });
@@ -401,63 +472,38 @@ app.post('/disconnect', async (req, res) => {
 
 // Explicitly wipe saved session so next connect requires a fresh QR / pairing code.
 // Use this when the user wants to switch to a different WhatsApp number.
-app.post('/clear-session', (req, res) => {
-    clearSessionFiles();
+sessionRouter.post('/clear-session', (req, res) => {
+    clearSessionFiles(req.wa.userId);
     res.json({ success: true, message: 'Session cleared — next connect will require QR or pairing code' });
 });
 
-// Resolve a phone number or stored JID to a sendable WhatsApp JID.
-// Handles @c.us stored in DB, raw numbers, @g.us groups, and @lid multi-device contacts.
-async function resolveJid(phone) {
-    // Groups / broadcast / status — pass through unchanged
-    if (phone.includes('@g.us') || phone.includes('@broadcast') || phone.includes('@newsletter')) {
-        return phone;
-    }
-
-    // Strip any @c.us or @lid suffix stored in the DB so we get just the number
-    let raw = phone.replace(/@\S+$/, '').replace(/[+\s\-()]/g, '');
-    
-    // Automatically prepend Indian country code '91' for 10-digit numbers
-    if (raw.length === 10) {
-        raw = '91' + raw;
-    }
-
-    try {
-        const numberId = await client.getNumberId(raw);
-        if (numberId && numberId._serialized) {
-            return numberId._serialized;
-        }
-    } catch (_) { /* fall through to @c.us default */ }
-
-    return `${raw}@c.us`;
-}
-
-app.post('/send', async (req, res) => {
+sessionRouter.post('/send', async (req, res) => {
+    const s = req.wa;
     const { phone, message } = req.body;
     if (!phone || !message) {
         return res.status(400).json({ success: false, error: 'Phone and message are required' });
     }
 
-    if (!isClientReady()) {
+    if (!isClientReady(s)) {
         return res.status(400).json({ success: false, error: 'WhatsApp client is not connected' });
     }
 
     try {
-        const jid = await resolveJid(phone);
+        const jid = await resolveJid(s, phone);
         console.log(`Sending to ${jid}: "${message.substring(0, 40)}..."`);
 
         let msg;
         try {
-            msg = await client.sendMessage(jid, message);
+            msg = await s.client.sendMessage(jid, message);
         } catch (sendErr) {
             // "No LID for user" means WhatsApp needs the @lid JID, not @c.us.
             // Re-resolve without filtering and retry once.
             if (sendErr.message && sendErr.message.includes('No LID')) {
                 const raw = jid.replace(/@\S+$/, '');
-                const numberId = await client.getNumberId(raw);
+                const numberId = await s.client.getNumberId(raw);
                 if (numberId && numberId._serialized && numberId._serialized !== jid) {
                     console.log(`LID retry: ${jid} → ${numberId._serialized}`);
-                    msg = await client.sendMessage(numberId._serialized, message);
+                    msg = await s.client.sendMessage(numberId._serialized, message);
                 } else {
                     throw sendErr;
                 }
@@ -468,27 +514,28 @@ app.post('/send', async (req, res) => {
 
         res.json({ success: true, message_id: msg.id.id, status: 'sent' });
     } catch (err) {
-        handleClientCrash(err);
+        handleClientCrash(s, err);
         console.error('Failed to send message:', err.message);
         res.status(500).json({ success: false, error: err.message });
     }
 });
 
-app.get('/contacts', async (req, res) => {
-    if (!isClientReady()) {
+sessionRouter.get('/contacts', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) {
         return res.status(400).json({ success: false, error: 'WhatsApp client is not connected' });
     }
 
     try {
-        console.log('Fetching contacts and chats from whatsapp-web.js client...');
-        const contacts = await client.getContacts();
+        console.log(`Fetching contacts and chats from whatsapp-web.js client for user ${s.userId}...`);
+        const contacts = await s.client.getContacts();
         let chats = [];
         try {
-            chats = await client.getChats();
+            chats = await s.client.getChats();
         } catch (chatErr) {
             console.warn('Failed to fetch active chats:', chatErr.message);
         }
-        
+
         const contactMap = new Map();
 
         // 1. Process contacts
@@ -575,27 +622,28 @@ app.get('/contacts', async (req, res) => {
                 // Numbers longer than 13 digits are WhatsApp-internal pseudo-IDs
                 return /^\+\d{7,13}$/.test(c.phone);
             });
-        
+
         console.log(`Fetched ${cleanContacts.length} total contacts (including groups and broadcasts)`);
         res.json({
             success: true,
             contacts: cleanContacts
         });
     } catch (err) {
-        handleClientCrash(err);
+        handleClientCrash(s, err);
         console.error('Failed to fetch contacts:', err);
         res.status(500).json({ success: false, error: err.message });
     }
 });
 
 // GET /chats — returns real WhatsApp chat list with last message + unread count
-app.get('/chats', async (req, res) => {
-    if (!isClientReady()) {
+sessionRouter.get('/chats', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) {
         return res.status(400).json({ success: false, error: 'WhatsApp client is not connected' });
     }
     try {
-        console.log('Fetching WhatsApp chat list...');
-        const chats = await client.getChats();
+        console.log(`Fetching WhatsApp chat list for user ${s.userId}...`);
+        const chats = await s.client.getChats();
         const result = chats.slice(0, 150).map(chat => {
             const isGroup = chat.isGroup;
             const phone = isGroup ? chat.id._serialized : ('+' + chat.id.user);
@@ -631,21 +679,22 @@ app.get('/chats', async (req, res) => {
         });
         res.json({ success: true, chats: result });
     } catch (e) {
-        handleClientCrash(e);
+        handleClientCrash(s, e);
         console.error('Failed to fetch chats:', e);
         res.status(500).json({ success: false, error: e.message });
     }
 });
 
 // GET /group-members?groupId=... — returns participants of a WhatsApp group
-app.get('/group-members', async (req, res) => {
-    if (!isClientReady()) {
+sessionRouter.get('/group-members', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) {
         return res.status(400).json({ success: false, error: 'WhatsApp client is not connected' });
     }
     const { groupId } = req.query;
     if (!groupId) return res.status(400).json({ success: false, error: 'groupId required' });
     try {
-        const chat = await client.getChatById(groupId);
+        const chat = await s.client.getChatById(groupId);
         if (!chat.isGroup) return res.status(400).json({ success: false, error: 'Not a group chat' });
         const members = (chat.participants || []).map(p => ({
             id: p.id._serialized,
@@ -662,93 +711,102 @@ app.get('/group-members', async (req, res) => {
 
 // ─── Phase 12: Group Management ──────────────────────────────────
 
-app.post('/group/create', async (req, res) => {
-    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
+sessionRouter.post('/group/create', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) return res.status(400).json({ success: false, error: 'Not connected' });
     const { name, participants } = req.body;
     if (!name || !participants?.length) return res.status(400).json({ success: false, error: 'name and participants required' });
     try {
         const ids = participants.map(p => p.replace(/[+\s\-()]/g, '') + '@c.us');
-        const result = await client.createGroup(name, ids);
+        const result = await s.client.createGroup(name, ids);
         res.json({ success: true, groupId: result.gid._serialized, name });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post('/group/add-members', async (req, res) => {
-    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
+sessionRouter.post('/group/add-members', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) return res.status(400).json({ success: false, error: 'Not connected' });
     const { groupId, participants } = req.body;
     try {
-        const chat = await client.getChatById(groupId);
+        const chat = await s.client.getChatById(groupId);
         const ids = participants.map(p => p.replace(/[+\s\-()]/g, '') + '@c.us');
         await chat.addParticipants(ids);
         res.json({ success: true });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post('/group/remove-member', async (req, res) => {
-    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
+sessionRouter.post('/group/remove-member', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) return res.status(400).json({ success: false, error: 'Not connected' });
     const { groupId, participantId } = req.body;
     try {
-        const chat = await client.getChatById(groupId);
+        const chat = await s.client.getChatById(groupId);
         await chat.removeParticipants([participantId]);
         res.json({ success: true });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post('/group/promote', async (req, res) => {
-    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
+sessionRouter.post('/group/promote', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) return res.status(400).json({ success: false, error: 'Not connected' });
     const { groupId, participantId } = req.body;
     try {
-        const chat = await client.getChatById(groupId);
+        const chat = await s.client.getChatById(groupId);
         await chat.promoteParticipants([participantId]);
         res.json({ success: true });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post('/group/demote', async (req, res) => {
-    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
+sessionRouter.post('/group/demote', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) return res.status(400).json({ success: false, error: 'Not connected' });
     const { groupId, participantId } = req.body;
     try {
-        const chat = await client.getChatById(groupId);
+        const chat = await s.client.getChatById(groupId);
         await chat.demoteParticipants([participantId]);
         res.json({ success: true });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post('/group/rename', async (req, res) => {
-    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
+sessionRouter.post('/group/rename', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) return res.status(400).json({ success: false, error: 'Not connected' });
     const { groupId, name } = req.body;
     try {
-        const chat = await client.getChatById(groupId);
+        const chat = await s.client.getChatById(groupId);
         await chat.setSubject(name);
         res.json({ success: true });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post('/group/set-description', async (req, res) => {
-    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
+sessionRouter.post('/group/set-description', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) return res.status(400).json({ success: false, error: 'Not connected' });
     const { groupId, description } = req.body;
     try {
-        const chat = await client.getChatById(groupId);
+        const chat = await s.client.getChatById(groupId);
         await chat.setDescription(description);
         res.json({ success: true });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.get('/group/invite-link', async (req, res) => {
-    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
+sessionRouter.get('/group/invite-link', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) return res.status(400).json({ success: false, error: 'Not connected' });
     const { groupId } = req.query;
     try {
-        const chat = await client.getChatById(groupId);
+        const chat = await s.client.getChatById(groupId);
         const code = await chat.getInviteCode();
         res.json({ success: true, link: `https://chat.whatsapp.com/${code}` });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post('/group/leave', async (req, res) => {
-    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
+sessionRouter.post('/group/leave', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) return res.status(400).json({ success: false, error: 'Not connected' });
     const { groupId } = req.body;
     try {
-        const chat = await client.getChatById(groupId);
+        const chat = await s.client.getChatById(groupId);
         await chat.leave();
         res.json({ success: true });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
@@ -756,10 +814,11 @@ app.post('/group/leave', async (req, res) => {
 
 // ─── Phase 13: Status ──────────────────────────────────────────────
 
-app.get('/status/list', async (req, res) => {
-    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
+sessionRouter.get('/status/list', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) return res.status(400).json({ success: false, error: 'Not connected' });
     try {
-        const contacts = await client.getContacts();
+        const contacts = await s.client.getContacts();
         const myContacts = contacts.filter(c => c.isMyContact && c.id && c.id.server === 'c.us').slice(0, 40);
         const statuses = [];
         for (const contact of myContacts) {
@@ -784,8 +843,9 @@ app.get('/status/list', async (req, res) => {
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post('/status/post', async (req, res) => {
-    if (!isClientReady()) return res.status(400).json({ success: false, error: 'Not connected' });
+sessionRouter.post('/status/post', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) return res.status(400).json({ success: false, error: 'Not connected' });
     const { text, mediaBase64, mediaType, caption } = req.body;
     try {
         if (mediaBase64 && mediaType) {
@@ -793,19 +853,20 @@ app.post('/status/post', async (req, res) => {
             const { MessageMedia } = await import('whatsapp-web.js');
             const media = new MessageMedia(mediaType, mediaBase64);
             const opts = caption ? { caption } : {};
-            await client.sendMessage('status@broadcast', media, opts);
+            await s.client.sendMessage('status@broadcast', media, opts);
         } else {
             if (!text) return res.status(400).json({ success: false, error: 'text or mediaBase64 required' });
-            await client.sendMessage('status@broadcast', text);
+            await s.client.sendMessage('status@broadcast', text);
         }
         res.json({ success: true, message: 'Status posted' });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
 // GET /profile-pic?phone=+91xxxxx — returns WhatsApp profile picture URL
-app.get('/profile-pic', async (req, res) => {
+sessionRouter.get('/profile-pic', async (req, res) => {
+    const s = req.wa;
     const { phone } = req.query;
-    if (!phone || !isClientReady()) {
+    if (!phone || !isClientReady(s)) {
         return res.json({ success: false, url: null });
     }
     try {
@@ -816,7 +877,7 @@ app.get('/profile-pic', async (req, res) => {
             const clean = phone.replace(/[+\s\-()]/g, '');
             jid = `${clean}@c.us`;
         }
-        const url = await client.getProfilePicUrl(jid);
+        const url = await s.client.getProfilePicUrl(jid);
         res.json({ success: true, url: url || null });
     } catch (e) {
         // Contact has no profile pic or privacy settings block it
@@ -825,20 +886,21 @@ app.get('/profile-pic', async (req, res) => {
 });
 
 // GET /my-profile — returns the connected account's own WhatsApp profile
-app.get('/my-profile', async (req, res) => {
-    if (!isClientReady()) {
+sessionRouter.get('/my-profile', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) {
         return res.status(400).json({ success: false, error: 'Not connected' });
     }
     try {
-        const info = client.info;
+        const info = s.client.info;
         const wid = info && info.wid ? info.wid : null;
-        const phone = wid ? ('+' + wid.user) : connectedPhone;
+        const phone = wid ? ('+' + wid.user) : s.connectedPhone;
         const name = (info && info.pushname) || phone;
 
         let profilePic = null;
         try {
             const jid = wid ? wid._serialized : (phone.replace('+', '') + '@c.us');
-            profilePic = await client.getProfilePicUrl(jid);
+            profilePic = await s.client.getProfilePicUrl(jid);
         } catch (_) { /* no pic or private */ }
 
         res.json({
@@ -853,14 +915,15 @@ app.get('/my-profile', async (req, res) => {
     }
 });
 
-// GET /sync-messages — full chat history for all chats (used on login to backfill DB)
-app.get('/contacts/count', async (req, res) => {
-    if (!isClientReady()) {
+// GET /contacts/count
+sessionRouter.get('/contacts/count', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) {
         return res.status(400).json({ success: false, count: 0, error: 'Not connected' });
     }
     try {
-        const contacts = await client.getContacts();
-        const chats = await client.getChats();
+        const contacts = await s.client.getContacts();
+        const chats = await s.client.getChats();
         const total = new Set([
             ...contacts.filter(c => c.id && c.id._serialized && c.id.server !== 'lid' && c.id.server !== 'newsletter' && c.id.server !== 'broadcast').map(c => c.id._serialized),
             ...chats.filter(c => c.id && c.id._serialized).map(c => c.id._serialized),
@@ -872,8 +935,9 @@ app.get('/contacts/count', async (req, res) => {
 });
 
 // GET /contacts/sync-stream — SSE endpoint that streams sync progress while returning contacts in batches
-app.get('/contacts/sync-stream', async (req, res) => {
-    if (!isClientReady()) {
+sessionRouter.get('/contacts/sync-stream', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) {
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
@@ -896,9 +960,9 @@ app.get('/contacts/sync-stream', async (req, res) => {
     try {
         send({ type: 'progress', phase: 'fetching', message: 'Fetching contacts from WhatsApp...' });
 
-        const contacts = await client.getContacts();
+        const contacts = await s.client.getContacts();
         let chats = [];
-        try { chats = await client.getChats(); } catch (_) {}
+        try { chats = await s.client.getChats(); } catch (_) {}
 
         send({ type: 'progress', phase: 'fetching', message: `Got ${contacts.length} address-book entries + ${chats.length} chats` });
 
@@ -966,15 +1030,16 @@ app.get('/contacts/sync-stream', async (req, res) => {
     }
 });
 
-app.get('/sync-messages', async (req, res) => {
-    if (!isClientReady()) {
+sessionRouter.get('/sync-messages', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) {
         return res.json({ success: false, chats: [], error: 'Not connected' });
     }
     const msgLimit = parseInt(req.query.msgLimit) || 100;   // messages per chat
     const chatLimit = parseInt(req.query.chatLimit) || 500; // all chats by default
     try {
         const VALID_PHONE_RE = /^\+\d{7,13}$/;
-        const chats = await client.getChats();
+        const chats = await s.client.getChats();
         const result = [];
         for (const chat of chats.slice(0, chatLimit)) {
             let phone, name;
@@ -1019,19 +1084,20 @@ app.get('/sync-messages', async (req, res) => {
         }
         res.json({ success: true, chats: result });
     } catch (e) {
-        handleClientCrash(e);
+        handleClientCrash(s, e);
         console.error('sync-messages error:', e.message);
         res.json({ success: false, chats: [], error: e.message });
     }
 });
 
 // GET /recent-messages — returns recent inbound messages across all chats
-app.get('/recent-messages', async (req, res) => {
-    if (!isClientReady()) {
+sessionRouter.get('/recent-messages', async (req, res) => {
+    const s = req.wa;
+    if (!isClientReady(s)) {
         return res.json({ success: false, messages: [] });
     }
     try {
-        const chats = await client.getChats();
+        const chats = await s.client.getChats();
         const recent = [];
         // Collect last message from each chat
         for (const chat of chats.slice(0, 30)) {
@@ -1057,20 +1123,21 @@ app.get('/recent-messages', async (req, res) => {
     }
 });
 
-app.post('/send-media', async (req, res) => {
+sessionRouter.post('/send-media', async (req, res) => {
+    const s = req.wa;
     const { phone, mediaUrl, caption } = req.body;
     if (!phone || !mediaUrl) {
         return res.status(400).json({ success: false, error: 'Phone and mediaUrl are required' });
     }
-    if (!isClientReady()) {
+    if (!isClientReady(s)) {
         return res.status(400).json({ success: false, error: 'WhatsApp client is not connected' });
     }
     try {
-        const jid = await resolveJid(phone);
+        const jid = await resolveJid(s, phone);
         console.log(`Sending media ${mediaUrl} to ${jid}...`);
-        
+
         const { MessageMedia } = await import('whatsapp-web.js');
-        
+
         let media;
         if (mediaUrl.startsWith('data:')) {
             const matches = mediaUrl.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
@@ -1082,9 +1149,9 @@ app.post('/send-media', async (req, res) => {
         } else {
             media = await MessageMedia.fromUrl(mediaUrl, { unsafeMime: true });
         }
-        
+
         const opts = caption ? { caption } : {};
-        const msg = await client.sendMessage(jid, media, opts);
+        const msg = await s.client.sendMessage(jid, media, opts);
         res.json({ success: true, message_id: msg.id.id, status: 'sent' });
     } catch (err) {
         console.error('Failed to send media:', err.message);
@@ -1092,19 +1159,20 @@ app.post('/send-media', async (req, res) => {
     }
 });
 
-app.post('/react', async (req, res) => {
+sessionRouter.post('/react', async (req, res) => {
+    const s = req.wa;
     const { messageId, emoji } = req.body;
     if (!messageId || !emoji) {
         return res.status(400).json({ success: false, error: 'messageId and emoji are required' });
     }
-    if (!isClientReady()) {
+    if (!isClientReady(s)) {
         return res.status(400).json({ success: false, error: 'WhatsApp client is not connected' });
     }
     try {
         console.log(`Reacting to message ${messageId} with ${emoji}...`);
         let msg;
         try {
-            msg = await client.getMessageById(messageId);
+            msg = await s.client.getMessageById(messageId);
         } catch (_) {}
         if (msg) {
             await msg.react(emoji);
@@ -1118,8 +1186,9 @@ app.post('/react', async (req, res) => {
     }
 });
 
+// Bridge-level health check — not tied to any specific user's session.
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', bridge: 'running', whatsapp: clientStatus, port: PORT });
+    res.json({ status: 'ok', bridge: 'running', activeSessions: sessions.size, port: PORT });
 });
 
 app.listen(PORT, () => {

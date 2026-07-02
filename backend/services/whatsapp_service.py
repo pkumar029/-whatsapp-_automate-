@@ -24,6 +24,14 @@ WHATSAPP_MAX_MESSAGE_LENGTH = 4096
 _PHONE_RE = re.compile(r'^\+?[0-9]{7,15}$')
 
 
+def bridge_url(user_id: int, path: str) -> str:
+    """Build a session-scoped bridge URL. The bridge has no concept of app
+    auth — user_id is just the opaque key it uses to keep each user's
+    whatsapp-web.js Client (and Chromium process) isolated from every
+    other user's."""
+    return f"{settings.BRIDGE_URL}/session/{user_id}{path}"
+
+
 class WhatsAppSendError(ValueError):
     """Raised when a message can't be sent. `retryable` tells callers (e.g. the
     automation runner) whether trying again might succeed — connection/recipient/
@@ -118,7 +126,7 @@ def get_session_status(db: Session, user_id: int) -> dict:
     if connection_type == "bridge" and session.status in (SessionStatus.connecting, SessionStatus.connected):
         try:
             import httpx
-            r = httpx.get("http://localhost:7002/status", timeout=5.0)
+            r = httpx.get(bridge_url(user_id, "/status"), timeout=5.0)
             if r.status_code == 200:
                 bridge_data = r.json()
                 bridge_status = bridge_data.get("status")
@@ -238,7 +246,7 @@ def connect_whatsapp_with_config(db: Session, config: "WhatsAppConnectRequest", 
         # the user stare at "Starting browser..." until the /connect call
         # itself times out.
         try:
-            httpx.get("http://localhost:7002/health", timeout=3.0).raise_for_status()
+            httpx.get(f"{settings.BRIDGE_URL}/health", timeout=3.0).raise_for_status()
         except Exception as health_err:
             logger.error(f"WhatsApp bridge health check failed: {health_err}")
             session.status = SessionStatus.disconnected
@@ -258,12 +266,12 @@ def connect_whatsapp_with_config(db: Session, config: "WhatsAppConnectRequest", 
                 payload["phone"] = config.phone
             if config.link_method:
                 payload["linkMethod"] = config.link_method
-            r = httpx.post("http://localhost:7002/connect", json=payload, timeout=5.0)
+            r = httpx.post(bridge_url(user_id, "/connect"), json=payload, timeout=5.0)
             if r.status_code != 200:
                 raise Exception(f"Bridge server returned status code {r.status_code}")
-                
+
             # Immediately get bridge status — may already be connected (saved session)
-            r_status = httpx.get("http://localhost:7002/status", timeout=5.0)
+            r_status = httpx.get(bridge_url(user_id, "/status"), timeout=5.0)
             qr_base64 = None
             pairing_code = None
             if r_status.status_code == 200:
@@ -326,7 +334,7 @@ def disconnect_whatsapp(db: Session, user_id: int) -> dict:
         if connection_type == "bridge":
             import httpx
             try:
-                httpx.post("http://localhost:7002/disconnect", timeout=5.0)
+                httpx.post(bridge_url(user_id, "/disconnect"), timeout=5.0)
             except Exception as e:
                 logger.warning(f"Failed to notify bridge of disconnect: {e}")
                 
@@ -348,7 +356,7 @@ def disconnect_whatsapp(db: Session, user_id: int) -> dict:
         raise
 
 
-def clear_bridge_session() -> dict:
+def clear_bridge_session(user_id: int) -> dict:
     """Tell the bridge to wipe its saved LocalAuth session.
 
     Should be called when the user explicitly wants to switch to a different
@@ -357,7 +365,7 @@ def clear_bridge_session() -> dict:
     """
     try:
         import httpx
-        r = httpx.post("http://localhost:7002/clear-session", timeout=5.0)
+        r = httpx.post(bridge_url(user_id, "/clear-session"), timeout=5.0)
         r.raise_for_status()
         return {"success": True, "message": "Bridge session cleared"}
     except Exception as e:
@@ -458,9 +466,9 @@ def send_whatsapp_message(db: Session, phone: str, message: str, user_id: int, c
                 "message": message
             }
             try:
-                r = httpx.post("http://localhost:7002/send", json=payload, timeout=15.0)
+                r = httpx.post(bridge_url(user_id, "/send"), json=payload, timeout=15.0)
             except (httpx.ConnectError, httpx.TimeoutException) as e:
-                raise ServiceUnavailableError(f"bridge unreachable on port 7002: {e}")
+                raise ServiceUnavailableError(f"bridge unreachable: {e}")
             if r.status_code != 200:
                 try:
                     res_data = r.json()

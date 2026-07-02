@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { whatsappApi, healthApi, BASE_URL } from '../../services/api'
 import { useApp } from '../../context/AppContext'
+import { useAuth } from '../../context/AuthContext'
 import { getErrorMessage } from '../../utils/error'
 
 // Default country code assumed when the user omits one (matches the existing
@@ -50,6 +51,7 @@ const CONNECTION_METHODS = [
 
 export default function Login() {
   const { sessionStatus, refreshSessionStatus, markConnectionInitiated, fetchWaProfile } = useApp()
+  const { user } = useAuth()
   const navigate = useNavigate()
 
   // View: 'splash' | 'method' | 'form' | 'connecting'
@@ -142,7 +144,7 @@ export default function Login() {
   // SSE listener while QR/pairing view is visible — replaces the old 2 s polling interval.
   // Falls back to 1.5 s polling if the SSE connection can't be established.
   useEffect(() => {
-    if (view !== 'connecting') return
+    if (view !== 'connecting' || !user) return
 
     let es = null
     let fallbackTimer = null
@@ -183,7 +185,7 @@ export default function Login() {
       fallbackTimer = setTimeout(poll, 1500)
     }
 
-    es = new EventSource(whatsappApi.eventsUrl())
+    es = new EventSource(whatsappApi.eventsUrl(user.id))
 
     es.onmessage = (evt) => {
       if (cancelled) return
@@ -217,7 +219,7 @@ export default function Login() {
       clearTimeout(fallbackTimer)
       clearTimeout(timeoutTimer)
     }
-  }, [view]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view, user]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSelectMethod = (id) => {
     setConnectionType(id)

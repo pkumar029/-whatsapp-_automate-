@@ -127,13 +127,14 @@ def sync_message_history(db: Session, user_id: int) -> dict:
     import httpx
     import re as _re
     from services.contacts_service import get_contact_by_phone
+    from services.whatsapp_service import bridge_url
 
     wa_account = _active_account(db, user_id)
     if not wa_account:
         return {"success": False, "message": "No active WhatsApp account"}
 
     try:
-        r = httpx.get("http://localhost:7002/sync-messages", timeout=60.0)
+        r = httpx.get(bridge_url(user_id, "/sync-messages"), timeout=60.0)
         r.raise_for_status()
         data = r.json()
     except Exception as e:

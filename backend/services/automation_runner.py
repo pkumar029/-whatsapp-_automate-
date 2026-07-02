@@ -249,9 +249,9 @@ def execute_step(db: Session, step: AutomationStep, context: Dict[str, Any]) -> 
         if phone and image_url:
             try:
                 import httpx as _httpx
-                from config.settings import settings as _s
+                from services.whatsapp_service import bridge_url
                 _httpx.post(
-                    f"{_s.BRIDGE_URL}/send-media",
+                    bridge_url(context.get("user_id"), "/send-media"),
                     json={"phone": phone, "mediaUrl": image_url, "caption": caption},
                     timeout=15.0,
                 )
@@ -294,9 +294,9 @@ def execute_step(db: Session, step: AutomationStep, context: Dict[str, Any]) -> 
         if message_id:
             try:
                 import httpx as _httpx
-                from config.settings import settings as _s
+                from services.whatsapp_service import bridge_url
                 _httpx.post(
-                    f"{_s.BRIDGE_URL}/react",
+                    bridge_url(context.get("user_id"), "/react"),
                     json={"messageId": message_id, "emoji": emoji},
                     timeout=5.0,
                 )

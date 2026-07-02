@@ -196,12 +196,12 @@ async def import_contacts(file: UploadFile = File(...), db: Session = Depends(ge
 
 
 @router.get("/chats")
-def get_whatsapp_chats(db: Session = Depends(get_db)):
+def get_whatsapp_chats(db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Get real-time WhatsApp chat list (with last message + unread count) from bridge."""
-    from config.settings import settings
+    from services.whatsapp_service import bridge_url
     try:
         import httpx
-        r = httpx.get(f"{settings.BRIDGE_URL}/chats", timeout=15.0)
+        r = httpx.get(bridge_url(user_id, "/chats"), timeout=15.0)
         if r.status_code != 200:
             return {"success": False, "chats": []}
         return r.json()
@@ -209,70 +209,70 @@ def get_whatsapp_chats(db: Session = Depends(get_db)):
         return {"success": False, "chats": []}
 
 
-def _bridge(path, method="get", **kwargs):
-    from config.settings import settings
+def _bridge(user_id, path, method="get", **kwargs):
+    from services.whatsapp_service import bridge_url
     import httpx
     fn = getattr(httpx, method)
     try:
-        r = fn(f"{settings.BRIDGE_URL}{path}", timeout=20.0, **kwargs)
+        r = fn(bridge_url(user_id, path), timeout=20.0, **kwargs)
         return r.json()
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
 @router.post("/group/create")
-def group_create(data: dict):
-    return _bridge("/group/create", "post", json=data)
+def group_create(data: dict, user_id: int = Depends(current_user_id)):
+    return _bridge(user_id, "/group/create", "post", json=data)
 
 
 @router.post("/group/add-members")
-def group_add_members(data: dict):
-    return _bridge("/group/add-members", "post", json=data)
+def group_add_members(data: dict, user_id: int = Depends(current_user_id)):
+    return _bridge(user_id, "/group/add-members", "post", json=data)
 
 
 @router.post("/group/remove-member")
-def group_remove_member(data: dict):
-    return _bridge("/group/remove-member", "post", json=data)
+def group_remove_member(data: dict, user_id: int = Depends(current_user_id)):
+    return _bridge(user_id, "/group/remove-member", "post", json=data)
 
 
 @router.post("/group/promote")
-def group_promote(data: dict):
-    return _bridge("/group/promote", "post", json=data)
+def group_promote(data: dict, user_id: int = Depends(current_user_id)):
+    return _bridge(user_id, "/group/promote", "post", json=data)
 
 
 @router.post("/group/demote")
-def group_demote(data: dict):
-    return _bridge("/group/demote", "post", json=data)
+def group_demote(data: dict, user_id: int = Depends(current_user_id)):
+    return _bridge(user_id, "/group/demote", "post", json=data)
 
 
 @router.post("/group/rename")
-def group_rename(data: dict):
-    return _bridge("/group/rename", "post", json=data)
+def group_rename(data: dict, user_id: int = Depends(current_user_id)):
+    return _bridge(user_id, "/group/rename", "post", json=data)
 
 
 @router.post("/group/set-description")
-def group_set_description(data: dict):
-    return _bridge("/group/set-description", "post", json=data)
+def group_set_description(data: dict, user_id: int = Depends(current_user_id)):
+    return _bridge(user_id, "/group/set-description", "post", json=data)
 
 
 @router.get("/group/invite-link")
-def group_invite_link(groupId: str = Query(...)):
-    return _bridge("/group/invite-link", params={"groupId": groupId})
+def group_invite_link(groupId: str = Query(...), user_id: int = Depends(current_user_id)):
+    return _bridge(user_id, "/group/invite-link", params={"groupId": groupId})
 
 
 @router.post("/group/leave")
-def group_leave(data: dict):
-    return _bridge("/group/leave", "post", json=data)
+def group_leave(data: dict, user_id: int = Depends(current_user_id)):
+    return _bridge(user_id, "/group/leave", "post", json=data)
 
 
 @router.get("/status/list")
-def status_list():
-    return _bridge("/status/list")
+def status_list(user_id: int = Depends(current_user_id)):
+    return _bridge(user_id, "/status/list")
 
 
 @router.post("/status/post")
-def status_post(data: dict):
-    return _bridge("/status/post", "post", json=data)
+def status_post(data: dict, user_id: int = Depends(current_user_id)):
+    return _bridge(user_id, "/status/post", "post", json=data)
 
 
 @router.get("/{contact_id}", response_model=ContactResponse)
@@ -308,11 +308,11 @@ def get_group_members(contact_id: int, db: Session = Depends(get_db), user_id: i
     contact = contacts_service.get_contact_by_id(db, contact_id, user_id)
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
-    from config.settings import settings
+    from services.whatsapp_service import bridge_url
     try:
         import httpx
         r = httpx.get(
-            f"{settings.BRIDGE_URL}/group-members",
+            bridge_url(user_id, "/group-members"),
             params={"groupId": contact.phone},
             timeout=10.0
         )
@@ -324,7 +324,7 @@ def get_group_members(contact_id: int, db: Session = Depends(get_db), user_id: i
 @router.get("/{contact_id}/profile-pic")
 def get_profile_pic(contact_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Return contact profile picture URL, using cached DB value when available."""
-    from config.settings import settings
+    from services.whatsapp_service import bridge_url
     contact = contacts_service.get_contact_by_id(db, contact_id, user_id)
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
@@ -335,7 +335,7 @@ def get_profile_pic(contact_id: int, db: Session = Depends(get_db), user_id: int
 
     try:
         import httpx
-        r = httpx.get(f"{settings.BRIDGE_URL}/profile-pic", params={"phone": contact.phone}, timeout=8.0)
+        r = httpx.get(bridge_url(user_id, "/profile-pic"), params={"phone": contact.phone}, timeout=8.0)
         url = r.json().get("url") if r.status_code == 200 else None
         if url:
             contact.profile_pic_url = url
