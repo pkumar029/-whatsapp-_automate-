@@ -8,6 +8,25 @@ import { whatsappApi, healthApi } from '../../services/api'
 import { useApp } from '../../context/AppContext'
 import { getErrorMessage } from '../../utils/error'
 
+// Default country code assumed when the user omits one (matches the existing
+// +91xxxxxxxxxx placeholders/dev defaults already used throughout this form).
+const DEFAULT_COUNTRY_CODE = '+91'
+const PHONE_RE = /^\+[1-9]\d{7,14}$/
+
+// Normalizes "9025945924" → "+919025945924"; leaves an already-prefixed
+// number (or one with a different country code) untouched aside from
+// stripping spaces/dashes.
+function normalizePhone(raw) {
+  const cleaned = (raw || '').trim().replace(/[\s-]/g, '')
+  if (!cleaned) return ''
+  return cleaned.startsWith('+') ? cleaned : `${DEFAULT_COUNTRY_CODE}${cleaned.replace(/^0+/, '')}`
+}
+
+// No SSE progress within this long at the 'launching'/'qr' step likely means
+// the bridge or the phone's scan is stuck — offer a clear way out instead of
+// leaving the user staring at a spinner indefinitely.
+const AUTH_TIMEOUT_MS = 90_000
+
 const CONNECTION_METHODS = [
   {
     id: 'bridge',
@@ -129,11 +148,21 @@ export default function Login() {
     let fallbackTimer = null
     let cancelled = false
 
+    // If nothing has completed authentication within AUTH_TIMEOUT_MS, stop
+    // waiting indefinitely — offer a clear way back instead of a frozen spinner.
+    const timeoutTimer = setTimeout(() => {
+      if (cancelled || didConnectRef.current) return
+      setErrorMsg('❌ Authentication timed out.')
+      setView('method')
+      whatsappApi.disconnect().catch(() => {})
+    }, AUTH_TIMEOUT_MS)
+
     const onConnected = () => {
       if (didConnectRef.current || cancelled) return
       didConnectRef.current = true
       if (es) { try { es.close() } catch (_) {} ; es = null }
       clearTimeout(fallbackTimer)
+      clearTimeout(timeoutTimer)
       setConnectionStep('connected')
       // Start profile fetch immediately (parallel to status refresh)
       fetchWaProfile()
@@ -169,8 +198,9 @@ export default function Login() {
         }
         if (data.type === 'authenticated') setConnectionStep('authenticated')
         if (bs === 'connected' || data.type === 'connected') onConnected()
+        if (data.type === 'info' && data.message) setMessage(data.message)
         if ((data.type === 'disconnected' || data.type === 'error') && !didConnectRef.current) {
-          setErrorMsg(data.message || data.reason || 'Connection failed — please try again.')
+          setErrorMsg(data.message || data.reason || '❌ Unable to connect to WhatsApp. Please try again.')
           setView('method')
         }
       } catch (_) {}
@@ -185,6 +215,7 @@ export default function Login() {
       cancelled = true
       if (es) { try { es.close() } catch (_) {} }
       clearTimeout(fallbackTimer)
+      clearTimeout(timeoutTimer)
     }
   }, [view]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -197,6 +228,21 @@ export default function Login() {
 
   const handleConnect = async (e) => {
     if (e) e.preventDefault()
+
+    // Bridge requires a real phone number — validate + auto-prefix the
+    // country code before ever hitting the network.
+    let normalizedPhone = phone
+    if (connectionType === 'bridge') {
+      normalizedPhone = normalizePhone(phone)
+      if (!PHONE_RE.test(normalizedPhone)) {
+        setErrorMsg('❌ Invalid phone number.')
+        return
+      }
+      setPhone(normalizedPhone)
+    } else if (phone) {
+      normalizedPhone = normalizePhone(phone)
+    }
+
     setConnecting(true)
     setMessage('')
     setErrorMsg('')
@@ -209,7 +255,7 @@ export default function Login() {
 
     const config = {
       connection_type: connectionType,
-      phone: phone || undefined,
+      phone: normalizedPhone || undefined,
       link_method: connectionType === 'bridge' ? bridgeLinkMethod : undefined,
       meta_token: connectionType === 'meta' ? metaToken : undefined,
       meta_phone_number_id: connectionType === 'meta' ? metaPhoneNumberId : undefined,
@@ -353,9 +399,15 @@ export default function Login() {
             </div>
           </div>
 
-          {errorMsg && (
-            <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 12px', marginBottom: 16, fontSize: 'var(--font-size-xs)', color: 'var(--accent-rose)' }}>
-              {errorMsg}
+          {errorMsg && !errorMsg.toLowerCase().includes('not authenticated') ? (
+            <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 'var(--radius-md)', padding: '12px 14px', marginBottom: 16, fontSize: 'var(--font-size-xs)', color: 'var(--accent-rose)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 14 }}>❌</span>
+              <span>{errorMsg}</span>
+            </div>
+          ) : (
+            <div style={{ background: 'rgba(37, 211, 102, 0.06)', border: '1px solid rgba(37, 211, 102, 0.25)', borderRadius: 'var(--radius-md)', padding: '12px 14px', marginBottom: 16, fontSize: 'var(--font-size-xs)', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-primary)', animation: 'pulse-ring 2.5s infinite' }} />
+              <span>Ready to connect your WhatsApp account.</span>
             </div>
           )}
 
@@ -479,21 +531,27 @@ export default function Login() {
             {/* Header */}
             <div style={{ textAlign: 'center', width: '100%' }}>
               <h2 style={{ fontSize: 18, fontWeight: 700, color: '#fff', margin: '0 0 4px' }}>Connecting WhatsApp</h2>
-              <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-                {connectionStep === 'launching' && 'Starting browser, please wait…'}
-                {connectionStep === 'qr' && (pairingCode ? 'Enter pairing code in WhatsApp' : 'Scan the QR code with your phone')}
-                {connectionStep === 'authenticated' && 'QR scanned — finishing authorization…'}
-                {connectionStep === 'connected' && 'Connected! Opening Dashboard…'}
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0, fontWeight: 500 }}>
+                {connectionStep === 'launching' && 'Generating QR Code...'}
+                {connectionStep === 'qr' && (pairingCode ? 'Pairing code ready — enter in WhatsApp' : 'Waiting for QR Scan...')}
+                {connectionStep === 'authenticated' && 'Device authorized — completing login...'}
+                {connectionStep === 'connected' && '🟢 Connected Successfully'}
               </p>
             </div>
+
+            {message && (
+              <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 'var(--radius-md)', padding: '8px 12px', fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)', width: '100%', textAlign: 'center' }}>
+                {message}
+              </div>
+            )}
 
             {/* Progress Steps */}
             <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>
               {[
-                { id: 'launching',     label: 'Launching browser' },
-                { id: 'qr',           label: pairingCode ? 'Pairing code ready' : 'QR Code ready' },
+                { id: 'launching',     label: 'Generating QR Code' },
+                { id: 'qr',           label: pairingCode ? 'Pairing code ready' : 'Waiting for QR Scan' },
                 { id: 'authenticated', label: 'Device authorized' },
-                { id: 'connected',     label: 'Opening Dashboard' },
+                { id: 'connected',     label: 'Connected Successfully' },
               ].map(step => (
                 <div key={step.id} className={`conn-step ${isDone(step.id) ? 'done' : isActive(step.id) ? 'active' : 'pending'}`}>
                   <div className="conn-step-icon">
@@ -538,7 +596,7 @@ export default function Login() {
               </div>
             )}
 
-            {errorMsg && (
+            {errorMsg && !errorMsg.toLowerCase().includes('not authenticated') && (
               <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 12px', fontSize: 'var(--font-size-xs)', color: 'var(--accent-rose)', width: '100%' }}>
                 {errorMsg}
               </div>

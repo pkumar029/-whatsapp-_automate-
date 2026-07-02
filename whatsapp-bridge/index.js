@@ -67,6 +67,15 @@ function pushEvent(type, extra = {}) {
     });
 }
 
+// ─── Structured auth-event logging ─────────────────────────────
+// One JSON line per event (session_created, qr_generated, qr_scanned,
+// auth_success, auth_failed, session_expired, logout) with a timestamp,
+// so auth issues can be traced from the console/log file without guessing
+// which of the scattered console.log calls corresponds to what happened.
+function logAuthEvent(event, details = {}) {
+    console.log(JSON.stringify({ ts: new Date().toISOString(), event, ...details }));
+}
+
 // True only when the WhatsApp client AND its Puppeteer browser page are alive.
 // client.pupPage can be null even when clientStatus === 'connected' if the
 // browser process crashed — guard every API handler with this.
@@ -95,6 +104,8 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
     const expectedPhone = phoneForPairingCode ? phoneForPairingCode.replace(/\D/g, '') : null;
 
     if (client) {
+        logAuthEvent('session_replaced', { message: 'Session already exists. Creating a new session...' });
+        pushEvent('info', { message: '❌ Session already exists. Creating a new session...' });
         try {
             console.log('Destroying existing client browser session...');
             await client.destroy();
@@ -112,6 +123,9 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
     connectedPhone = null;
     pairingCode = null;
     lastError = null;
+
+    const sessionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    logAuthEvent('session_created', { sessionId, phone: phoneForPairingCode || null, linkMethod });
 
     console.log('Initializing whatsapp-web.js client...');
     if (phoneForPairingCode) {
@@ -179,6 +193,8 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
                 }
             }
 
+            logAuthEvent('qr_generated', { sessionId, pairingCode: !!pairingCode });
+
             // Push QR to all SSE listeners instantly
             pushEvent('qr_ready', { qr: qrCodeBase64, pairing_code: pairingCode });
         } catch (err) {
@@ -207,6 +223,7 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
                 pairingCode = null;
                 connectedPhone = null;
                 lastError = `Security Verification Failed: Connected account (${cleanActual}) does not match the requested phone number (${expectedPhone}).`;
+                logAuthEvent('auth_failed', { sessionId, reason: lastError });
                 pushEvent('error', { message: lastError });
                 try {
                     await client.logout();
@@ -226,11 +243,13 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
         qrCodeBase64 = null;
         pairingCode = null;
         connectedPhone = actualPhone;
+        logAuthEvent('auth_success', { sessionId, phone: connectedPhone });
         pushEvent('connected', { phone: connectedPhone });
     });
 
     client.on('authenticated', () => {
         console.log('WhatsApp Client authenticated.');
+        logAuthEvent('qr_scanned', { sessionId });
         pushEvent('authenticated');
     });
 
@@ -240,6 +259,7 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
         lastError = `Auth failure: ${msg}`;
         qrCodeBase64 = null;
         pairingCode = null;
+        logAuthEvent('auth_failed', { sessionId, reason: msg });
         pushEvent('error', { message: lastError });
     });
 
@@ -249,6 +269,7 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
         connectedPhone = null;
         qrCodeBase64 = null;
         pairingCode = null;
+        logAuthEvent(reason === 'LOGOUT' ? 'logout' : 'session_expired', { sessionId, reason });
         pushEvent('disconnected', { reason });
     });
 
@@ -300,6 +321,8 @@ async function initClient(phoneForPairingCode = null, linkMethod = 'qr') {
         clientStatus = 'disconnected';
         lastError = err.message;
         pairingCode = null;
+        logAuthEvent('auth_failed', { sessionId, reason: err.message });
+        pushEvent('error', { message: `❌ Unable to connect to WhatsApp. Please try again. (${err.message})` });
     });
 }
 
@@ -348,6 +371,7 @@ app.post('/connect', async (req, res) => {
 });
 
 app.post('/disconnect', async (req, res) => {
+    logAuthEvent('logout', { requested: true });
     if (!client) {
         clientStatus = 'disconnected';
         return res.json({ success: true, message: 'No client session to disconnect' });

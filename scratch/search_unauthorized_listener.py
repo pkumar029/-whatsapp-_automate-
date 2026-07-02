@@ -2,7 +2,7 @@ import os
 import sys
 
 sys.stdout.reconfigure(encoding='utf-8')
-dir_path = "C:/Users/ELCOT/Desktop/project/whatsapp-automate/frontend/src"
+dir_path = "C:/Users/ELCOT/Desktop/project/whatsapp-automate/frontend"
 for root, dirs, files in os.walk(dir_path):
     for file in files:
         if file.endswith(('.js', '.jsx')):
@@ -10,10 +10,7 @@ for root, dirs, files in os.walk(dir_path):
             try:
                 with open(path, 'r', encoding='utf-8') as f:
                     content = f.read()
-                if "routes" in file.lower() or "app.jsx" in file.lower():
-                    print(f"File: {path}")
-                    for line in content.splitlines():
-                        if "path=" in line.lower() or "route" in line.lower():
-                            print("  ", line.strip())
+                if "unauthorized" in content.lower():
+                    print(f"Found in: {path}")
             except Exception:
                 pass

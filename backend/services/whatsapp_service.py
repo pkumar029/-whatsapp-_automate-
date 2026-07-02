@@ -233,12 +233,25 @@ def connect_whatsapp_with_config(db: Session, config: "WhatsAppConnectRequest", 
         
     elif config.connection_type == "bridge":
         import httpx
+
+        # Proactive check — fail fast with a clear message instead of letting
+        # the user stare at "Starting browser..." until the /connect call
+        # itself times out.
+        try:
+            httpx.get("http://localhost:7002/health", timeout=3.0).raise_for_status()
+        except Exception as health_err:
+            logger.error(f"WhatsApp bridge health check failed: {health_err}")
+            session.status = SessionStatus.disconnected
+            session.error_message = "❌ WhatsApp Bridge service is offline."
+            db.commit()
+            raise Exception(session.error_message)
+
         try:
             session_data["phone"] = config.phone
             session.session_data = session_data
             session.status = SessionStatus.connecting
             db.commit()
-            
+
             # Request connection from bridge
             payload = {}
             if config.phone:
@@ -296,7 +309,7 @@ def connect_whatsapp_with_config(db: Session, config: "WhatsAppConnectRequest", 
         except Exception as e:
             logger.error(f"Failed to connect to bridge: {e}")
             session.status = SessionStatus.disconnected
-            session.error_message = f"Failed to connect to whatsapp-web.js bridge: ensure node server is running on port 7002. ({str(e)})"
+            session.error_message = f"❌ Unable to connect to WhatsApp. Please try again. ({str(e)})"
             db.commit()
             raise Exception(session.error_message)
     else:
