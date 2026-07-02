@@ -84,28 +84,6 @@ async def register(data: RegisterRequest, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/auto-token")
-async def auto_token(db: Session = Depends(get_db)):
-    """Return a JWT for the default admin user — no credentials needed.
-    Used by single-user installations to avoid manual login."""
-    from models.models import User
-    from services.auth_service import create_access_token
-    user = db.query(User).filter(User.is_active == True).order_by(User.id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="No user configured")
-    token = create_access_token(user.id, user.email, user.name)
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "user": {
-            "id": user.id,
-            "name": user.name,
-            "username": user.email,
-            "is_admin": user.is_admin,
-        },
-    }
-
-
 @router.post("/logout")
 async def logout():
     """Logout — client should discard the JWT; server is stateless."""

@@ -8,13 +8,14 @@ from database.connection import get_db, SessionLocal
 from services import automations_service
 from services.automation_runner import run_automation
 from models.schemas import AutomationCreate, AutomationUpdate, AutomationListResponse, StepSchema
+from dependencies import current_user_id
 
 router = APIRouter(prefix="/automations", tags=["Automations"])
 
 
-def _active_wa_account(db: Session) -> Optional[str]:
+def _active_wa_account(db: Session, user_id: int) -> Optional[str]:
     from models.models import WhatsappSession, SessionStatus as SS
-    session = db.query(WhatsappSession).filter(WhatsappSession.status == SS.connected).first()
+    session = db.query(WhatsappSession).filter(WhatsappSession.user_id == user_id, WhatsappSession.status == SS.connected).first()
     return session.phone if session else None
 
 
@@ -24,58 +25,59 @@ async def list_automations(
     limit: int = Query(20, ge=1, le=100),
     search: Optional[str] = Query(None),
     wa_account: Optional[str] = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user_id: int = Depends(current_user_id),
 ):
     if not wa_account:
-        wa_account = _active_wa_account(db)
-    return automations_service.get_automations(db, page=page, limit=limit, search=search, wa_account=wa_account)
+        wa_account = _active_wa_account(db, user_id)
+    return automations_service.get_automations(db, user_id, page=page, limit=limit, search=search, wa_account=wa_account)
 
 
 @router.post("", status_code=201)
-async def create_automation(data: AutomationCreate, db: Session = Depends(get_db)):
+async def create_automation(data: AutomationCreate, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     try:
-        wa_account = _active_wa_account(db)
-        automation = automations_service.create_automation(db, data, wa_account=wa_account)
+        wa_account = _active_wa_account(db, user_id)
+        automation = automations_service.create_automation(db, data, user_id, wa_account=wa_account)
         return {"success": True, "id": automation.id, "name": automation.name}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/{automation_id}")
-async def get_automation(automation_id: int, db: Session = Depends(get_db)):
-    automation = automations_service.get_automation_by_id(db, automation_id)
+async def get_automation(automation_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
+    automation = automations_service.get_automation_by_id(db, automation_id, user_id)
     if not automation:
         raise HTTPException(status_code=404, detail="Automation not found")
     return automation
 
 
 @router.put("/{automation_id}")
-async def update_automation(automation_id: int, data: AutomationUpdate, db: Session = Depends(get_db)):
-    automation = automations_service.update_automation(db, automation_id, data)
+async def update_automation(automation_id: int, data: AutomationUpdate, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
+    automation = automations_service.update_automation(db, automation_id, data, user_id)
     if not automation:
         raise HTTPException(status_code=404, detail="Automation not found")
     return {"success": True, "id": automation.id}
 
 
 @router.delete("/{automation_id}")
-async def delete_automation(automation_id: int, db: Session = Depends(get_db)):
-    deleted = automations_service.delete_automation(db, automation_id)
+async def delete_automation(automation_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
+    deleted = automations_service.delete_automation(db, automation_id, user_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Automation not found")
     return {"success": True, "message": "Automation deleted"}
 
 
 @router.post("/{automation_id}/activate")
-async def activate(automation_id: int, db: Session = Depends(get_db)):
-    result = automations_service.activate_automation(db, automation_id)
+async def activate(automation_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
+    result = automations_service.activate_automation(db, automation_id, user_id)
     if not result:
         raise HTTPException(status_code=404, detail="Automation not found")
     return {"success": True, "is_active": True}
 
 
 @router.post("/{automation_id}/deactivate")
-async def deactivate(automation_id: int, db: Session = Depends(get_db)):
-    result = automations_service.deactivate_automation(db, automation_id)
+async def deactivate(automation_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
+    result = automations_service.deactivate_automation(db, automation_id, user_id)
     if not result:
         raise HTTPException(status_code=404, detail="Automation not found")
     return {"success": True, "is_active": False}
@@ -86,10 +88,11 @@ async def run_now(
     automation_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    user_id: int = Depends(current_user_id),
     dry_run: bool = Query(False, description="Simulate without sending real messages"),
 ):
     """Trigger an automation run immediately. Pass dry_run=true to simulate without sending."""
-    automation = automations_service.get_automation_by_id(db, automation_id)
+    automation = automations_service.get_automation_by_id(db, automation_id, user_id)
     if not automation:
         raise HTTPException(status_code=404, detail="Automation not found")
     name = automation.name
@@ -125,9 +128,10 @@ async def get_history(
     automation_id: int,
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
+    user_id: int = Depends(current_user_id),
 ):
     """Return recent run logs for a specific automation."""
-    automation = automations_service.get_automation_by_id(db, automation_id)
+    automation = automations_service.get_automation_by_id(db, automation_id, user_id)
     if not automation:
         raise HTTPException(status_code=404, detail="Automation not found")
     from models.models import AutomationLog
@@ -157,9 +161,9 @@ async def get_history(
 
 
 @router.post("/{automation_id}/duplicate", status_code=201)
-async def duplicate_automation(automation_id: int, db: Session = Depends(get_db)):
+async def duplicate_automation(automation_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Duplicate an automation and all its steps."""
-    src = automations_service.get_automation_by_id(db, automation_id)
+    src = automations_service.get_automation_by_id(db, automation_id, user_id)
     if not src:
         raise HTTPException(status_code=404, detail="Automation not found")
     from models.schemas import AutomationCreate, StepSchema
@@ -174,14 +178,16 @@ async def duplicate_automation(automation_id: int, db: Session = Depends(get_db)
         trigger_config=src.trigger_config,
         steps=steps,
     )
-    new_auto = automations_service.create_automation(db, copy_data)
+    new_auto = automations_service.create_automation(db, copy_data, user_id)
     return {"success": True, "id": new_auto.id, "name": new_auto.name}
 
 
 @router.post("/{automation_id}/webhook-trigger")
-async def webhook_trigger(automation_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    """External systems can POST here to trigger a webhook_received automation."""
-    automation = automations_service.get_automation_by_id(db, automation_id)
+async def webhook_trigger(automation_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
+    """External systems can POST here to trigger a webhook_received automation.
+    Requires the owner's JWT like every other route now that auth is real —
+    an anonymous/shared webhook secret would be a separate feature."""
+    automation = automations_service.get_automation_by_id(db, automation_id, user_id)
     if not automation:
         raise HTTPException(status_code=404, detail="Automation not found")
     if not automation.is_active:
@@ -202,35 +208,35 @@ async def webhook_trigger(automation_id: int, background_tasks: BackgroundTasks,
 
 
 @router.get("/{automation_id}/steps")
-async def get_steps(automation_id: int, db: Session = Depends(get_db)):
-    automation = automations_service.get_automation_by_id(db, automation_id)
+async def get_steps(automation_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
+    automation = automations_service.get_automation_by_id(db, automation_id, user_id)
     if not automation:
         raise HTTPException(status_code=404, detail="Automation not found")
     return automation.steps
 
 
 @router.post("/{automation_id}/steps", status_code=201)
-async def add_step(automation_id: int, data: StepSchema, db: Session = Depends(get_db)):
+async def add_step(automation_id: int, data: StepSchema, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Add a single step to an automation."""
-    step = automations_service.add_step(db, automation_id, data)
+    step = automations_service.add_step(db, automation_id, data, user_id)
     if not step:
         raise HTTPException(status_code=404, detail="Automation not found")
     return {"success": True, "id": step.id, "step_order": step.step_order}
 
 
 @router.put("/{automation_id}/steps/{step_id}")
-async def update_step(automation_id: int, step_id: int, data: StepSchema, db: Session = Depends(get_db)):
+async def update_step(automation_id: int, step_id: int, data: StepSchema, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Update a single automation step."""
-    step = automations_service.update_step(db, automation_id, step_id, data)
+    step = automations_service.update_step(db, automation_id, step_id, data, user_id)
     if not step:
         raise HTTPException(status_code=404, detail="Step not found")
     return {"success": True, "id": step.id}
 
 
 @router.delete("/{automation_id}/steps/{step_id}")
-async def delete_step(automation_id: int, step_id: int, db: Session = Depends(get_db)):
+async def delete_step(automation_id: int, step_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Delete a single automation step."""
-    deleted = automations_service.delete_step(db, automation_id, step_id)
+    deleted = automations_service.delete_step(db, automation_id, step_id, user_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Step not found")
     return {"success": True, "message": "Step deleted"}

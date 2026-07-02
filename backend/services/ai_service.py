@@ -92,17 +92,8 @@ async def generate_reply(
         raise ValueError(f"Unknown AI provider: {provider!r}")
 
 
-# ─── Settings helpers ─────────────────────────────────────────────
+# ─── Settings helpers (per user) ───────────────────────────────────
 
-_AI_KEYS = {
-    "provider": "ai_provider",
-    "api_key": "ai_api_key",
-    "tone": "ai_tone",
-    "language": "ai_language",
-    "model": "ai_model",
-    "enabled": "ai_enabled",
-    "auto_suggest": "ai_auto_suggest",
-}
 _DEFAULTS = {
     "provider": "openai",
     "api_key": "",
@@ -114,40 +105,38 @@ _DEFAULTS = {
 }
 
 
-def get_ai_settings(db) -> dict:
-    from models.models import SystemSettings
-    rows = {r.key: r.value for r in db.query(SystemSettings).filter(
-        SystemSettings.key.in_(_AI_KEYS.values())
-    ).all()}
-    result = dict(_DEFAULTS)
-    for field, db_key in _AI_KEYS.items():
-        if db_key in rows:
-            raw = rows[db_key]
-            if field in ("enabled", "auto_suggest"):
-                result[field] = raw.lower() == "true"
-            else:
-                result[field] = raw
-    return result
+def get_ai_settings(db, user_id: int) -> dict:
+    from models.models import UserAISettings
+    row = db.query(UserAISettings).filter(UserAISettings.user_id == user_id).first()
+    if not row:
+        return dict(_DEFAULTS)
+    return {
+        "provider": row.provider or _DEFAULTS["provider"],
+        "api_key": row.api_key or "",
+        "tone": row.tone or _DEFAULTS["tone"],
+        "language": row.language or _DEFAULTS["language"],
+        "model": row.model or "",
+        "enabled": bool(row.enabled),
+        "auto_suggest": bool(row.auto_suggest),
+    }
 
 
-def save_ai_settings(db, updates: dict) -> dict:
-    from models.models import SystemSettings
+def save_ai_settings(db, user_id: int, updates: dict) -> dict:
+    from models.models import UserAISettings
     from datetime import datetime
 
-    for field, db_key in _AI_KEYS.items():
-        if field not in updates:
-            continue
-        val = updates[field]
-        # Never erase an existing API key with a blank value
-        if field == "api_key" and not str(val).strip():
-            continue
-        str_val = str(val).lower() if isinstance(val, bool) else str(val)
-        row = db.query(SystemSettings).filter(SystemSettings.key == db_key).first()
-        if row:
-            row.value = str_val
-            row.updated_at = datetime.utcnow()
-        else:
-            db.add(SystemSettings(key=db_key, value=str_val))
+    row = db.query(UserAISettings).filter(UserAISettings.user_id == user_id).first()
+    if not row:
+        row = UserAISettings(user_id=user_id)
+        db.add(row)
+
+    for field in ("provider", "tone", "language", "model", "enabled", "auto_suggest"):
+        if field in updates:
+            setattr(row, field, updates[field])
+    # Never erase an existing API key with a blank value
+    if "api_key" in updates and str(updates["api_key"]).strip():
+        row.api_key = updates["api_key"]
+    row.updated_at = datetime.utcnow()
 
     db.commit()
-    return get_ai_settings(db)
+    return get_ai_settings(db, user_id)

@@ -17,8 +17,11 @@ def upsert_whatsapp_profile(
     profile_pic_url: Optional[str] = None,
     about: Optional[str] = None,
     wid: Optional[str] = None,
+    user_id: Optional[int] = None,
 ) -> WhatsAppProfile:
-    """Insert or update a WhatsApp profile keyed by wa_account (phone number)."""
+    """Insert or update a WhatsApp profile keyed by wa_account (phone number) —
+    the profile belongs to the phone number itself; user_id is stamped for
+    record-keeping (who most recently connected it), not used as a lookup key."""
     profile = db.query(WhatsAppProfile).filter(WhatsAppProfile.wa_account == wa_account).first()
     if profile:
         if name is not None:
@@ -29,9 +32,12 @@ def upsert_whatsapp_profile(
             profile.about = about
         if wid is not None:
             profile.wid = wid
+        if user_id is not None:
+            profile.user_id = user_id
         profile.last_synced_at = datetime.utcnow()
     else:
         profile = WhatsAppProfile(
+            user_id=user_id,
             wa_account=wa_account,
             display_name=name,
             profile_pic_url=profile_pic_url,
@@ -49,7 +55,7 @@ def get_whatsapp_profile(db: Session, wa_account: str) -> Optional[WhatsAppProfi
     return db.query(WhatsAppProfile).filter(WhatsAppProfile.wa_account == wa_account).first()
 
 
-def fetch_and_save_profile(db: Session, wa_account: str) -> dict:
+def fetch_and_save_profile(db: Session, wa_account: str, user_id: Optional[int] = None) -> dict:
     """
     Call the bridge /my-profile, upsert in DB, and return the profile dict.
     Falls back to the stored DB record if the bridge is unreachable.
@@ -71,6 +77,7 @@ def fetch_and_save_profile(db: Session, wa_account: str) -> dict:
             profile_pic_url=bridge_data.get("profile_pic"),
             about=bridge_data.get("about"),
             wid=bridge_data.get("wid"),
+            user_id=user_id,
         )
     else:
         profile = get_whatsapp_profile(db, wa_account)

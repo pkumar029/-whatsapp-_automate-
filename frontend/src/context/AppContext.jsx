@@ -1,9 +1,13 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react'
 import { whatsappApi, contactsApi, messagesApi, authApi } from '../services/api'
+import { useAuth } from './AuthContext'
 
 const AppContext = createContext()
 
 export function AppProvider({ children }) {
+  // /whatsapp/status and /whatsapp/events are now scoped to the logged-in
+  // user — don't poll/connect either until a real session exists.
+  const { isAuthenticated } = useAuth()
   // ─── Theme ──────────────────────────────────────────────────
   const [theme, setThemeState] = useState(() => localStorage.getItem('wa_theme') || 'dark')
 
@@ -159,15 +163,17 @@ export function AppProvider({ children }) {
 
   // ─── Polling fallback (every 8 s) ───────────────────────────
   useEffect(() => {
+    if (!isAuthenticated) return
     refreshSessionStatus()
     const interval = setInterval(refreshSessionStatus, 8000)
     return () => clearInterval(interval)
-  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isAuthenticated])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Persistent global SSE listener ─────────────────────────
   // Stays alive for the full app session. Provides instant detection of
   // connected / disconnected / qr events without waiting for the 8 s poll.
   useEffect(() => {
+    if (!isAuthenticated) return
     let es = null
     let reconnectTimer = null
     let cancelled = false

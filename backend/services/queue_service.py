@@ -18,13 +18,15 @@ from services import whatsapp_service
 logger = logging.getLogger(__name__)
 
 
-def create_campaign(db: Session, data: CampaignCreate, wa_account: Optional[str] = None) -> Campaign:
+def create_campaign(db: Session, data: CampaignCreate, user_id: int, wa_account: Optional[str] = None) -> Campaign:
     """Create a new Campaign and schedule message jobs for each contact with variable templates."""
     # Validate contacts list
     if not data.contacts:
         raise ValueError("At least one contact must be selected")
 
-    contacts = db.query(Contact).filter(Contact.id.in_(data.contacts)).all()
+    # Scoped to this user — otherwise a crafted contact id list could target
+    # another user's contacts.
+    contacts = db.query(Contact).filter(Contact.id.in_(data.contacts), Contact.user_id == user_id).all()
     if len(contacts) != len(data.contacts):
         found_ids = [c.id for c in contacts]
         missing_ids = list(set(data.contacts) - set(found_ids))
@@ -32,6 +34,7 @@ def create_campaign(db: Session, data: CampaignCreate, wa_account: Optional[str]
 
     # Create Campaign record
     campaign = Campaign(
+        user_id=user_id,
         name=data.name,
         wa_account=wa_account,
         status=CampaignStatus.active,
@@ -144,39 +147,53 @@ def process_due_jobs(db: Session):
     if not due_jobs:
         return
 
-    # Check WhatsApp connection health before starting any job delivery
-    session_status = whatsapp_service.get_session_status(db)
-    is_session_connected = (session_status.get("status") == "connected")
+    # Every job belongs to a campaign, and every campaign belongs to a user —
+    # resolve + cache each owner's connection status per tick rather than
+    # assuming one global session. Until the bridge supports concurrent
+    # per-user sessions (a separate piece of work), only the currently
+    # connected user's jobs will actually go out each tick; other users'
+    # due jobs are simply left queued (not lost) until their turn.
+    connected_cache: dict = {}
+
+    def _is_connected(owner_user_id: int) -> bool:
+        if owner_user_id not in connected_cache:
+            status = whatsapp_service.get_session_status(db, owner_user_id)
+            connected_cache[owner_user_id] = (status.get("status") == "connected")
+        return connected_cache[owner_user_id]
 
     for job in due_jobs:
-        # Respect Campaign Concurrency & Delay
-        if job.campaign_id:
-            campaign = db.query(Campaign).filter(Campaign.id == job.campaign_id).first()
-            if not campaign or campaign.status != CampaignStatus.active:
+        # Every real job has a campaign_id (MessageJob is only ever created
+        # via create_campaign) — skip anything malformed defensively.
+        if not job.campaign_id:
+            continue
+
+        campaign = db.query(Campaign).filter(Campaign.id == job.campaign_id).first()
+        if not campaign or campaign.status != CampaignStatus.active:
+            continue
+        owner_user_id = campaign.user_id
+
+        # Check Concurrency Limit
+        current_sends = active_send_map.get(job.campaign_id, 0)
+        if current_sends >= campaign.concurrency:
+            logger.debug(f"Campaign {campaign.id} concurrency limit reached ({current_sends}/{campaign.concurrency}). Skipping job {job.id}.")
+            continue
+
+        # Check Delay Spacing Limit
+        last_sent = last_sent_times.get(job.campaign_id)
+        if last_sent:
+            elapsed = (now - last_sent).total_seconds()
+            if elapsed < campaign.delay_seconds:
+                logger.debug(f"Campaign {campaign.id} delay spacing active (elapsed {elapsed:.1f}s < {campaign.delay_seconds}s). Skipping job {job.id}.")
                 continue
 
-            # Check Concurrency Limit
-            current_sends = active_send_map.get(job.campaign_id, 0)
-            if current_sends >= campaign.concurrency:
-                logger.debug(f"Campaign {campaign.id} concurrency limit reached ({current_sends}/{campaign.concurrency}). Skipping job {job.id}.")
-                continue
-
-            # Check Delay Spacing Limit
-            last_sent = last_sent_times.get(job.campaign_id)
-            if last_sent:
-                elapsed = (now - last_sent).total_seconds()
-                if elapsed < campaign.delay_seconds:
-                    logger.debug(f"Campaign {campaign.id} delay spacing active (elapsed {elapsed:.1f}s < {campaign.delay_seconds}s). Skipping job {job.id}.")
-                    continue
-
-        # Check WhatsApp connectivity. If not connected, we keep job as queued, clear lock, and exit processing
-        if not is_session_connected:
-            logger.warning("WhatsApp session is offline. Skipping job execution to avoid false sent records.")
-            # Clear lock just in case it was a stuck lock recovery
+        # Check this campaign owner's WhatsApp connectivity. If not connected,
+        # leave the job queued (clear any stuck lock) and move on to the next job
+        # — a different job may belong to a currently-connected user.
+        if not _is_connected(owner_user_id):
             if job.lock_time:
                 job.lock_time = None
                 db.commit()
-            break
+            continue
 
         # Acquire pessimistic lock on the individual job
         locked_job = db.query(MessageJob).filter(
@@ -199,17 +216,18 @@ def process_due_jobs(db: Session):
         # Process send
         logger.info(f"Processing job {job.id} to phone {job.phone}")
         try:
-            res = whatsapp_service.send_whatsapp_message(db, job.phone, job.body)
-            
+            res = whatsapp_service.send_whatsapp_message(db, job.phone, job.body, owner_user_id)
+
             # Send Success: mark job as sent
             locked_job.status = JobStatus.sent
             locked_job.sent_time = datetime.utcnow()
             locked_job.provider_id = res.get("message_id")
             locked_job.lock_time = None
             locked_job.failure_reason = None
-            
+
             # Save message in regular chat history
             msg = Message(
+                user_id=owner_user_id,
                 contact_id=job.contact_id,
                 phone=job.phone,
                 direction=MessageDirection.outbound,
@@ -234,17 +252,19 @@ def process_due_jobs(db: Session):
             err_msg = str(e)
             logger.error(f"Failed to send job {job.id}: {err_msg}")
             
-            # Determine if error is permanent (like invalid number format or unregistered)
-            is_permanent = "invalid" in err_msg.lower() or "not registered" in err_msg.lower() or "format" in err_msg.lower()
-            
+            # whatsapp_service classifies its own errors — retryable=False means
+            # trying again won't help (not connected, invalid number, etc.)
+            is_permanent = not getattr(e, "retryable", False)
+
             if is_permanent or locked_job.retry_count >= 3:
                 # Permanent failure
                 locked_job.status = JobStatus.failed
                 locked_job.failure_reason = err_msg
                 locked_job.lock_time = None
-                
+
                 # Save failed record in chat history
                 msg = Message(
+                    user_id=owner_user_id,
                     contact_id=job.contact_id,
                     phone=job.phone,
                     direction=MessageDirection.outbound,

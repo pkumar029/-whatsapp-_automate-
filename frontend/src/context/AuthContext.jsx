@@ -6,26 +6,31 @@ const AuthContext = createContext()
 const TOKEN_KEY = 'wa_token'
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState({ name: 'Admin', username: 'admin' })
-  const [authLoading, setAuthLoading] = useState(false)
+  const [user, setUser] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
 
-  const isAuthenticated = true
+  const isAuthenticated = !!user
 
-  // On mount: ensure a valid JWT token exists. If not, fetch one automatically.
+  // On mount: if a token is stored, verify it's still valid and load the
+  // real user. No token (or an invalid one) just means "not logged in".
   useEffect(() => {
     const token = localStorage.getItem(TOKEN_KEY)
-    if (token) {
+    if (!token) {
       setAuthLoading(false)
       return
     }
-    authApi.autoToken()
-      .then(res => {
-        const { access_token, user: userData } = res.data
-        localStorage.setItem(TOKEN_KEY, access_token)
-        setUser(userData)
-      })
-      .catch(() => {})
+    authApi.me()
+      .then(res => setUser(res.data))
+      .catch(() => localStorage.removeItem(TOKEN_KEY))
       .finally(() => setAuthLoading(false))
+  }, [])
+
+  // api.js dispatches this on any 401 — drop the stale session so
+  // AuthRoute redirects to /auth.
+  useEffect(() => {
+    const handler = () => setUser(null)
+    window.addEventListener('auth:unauthorized', handler)
+    return () => window.removeEventListener('auth:unauthorized', handler)
   }, [])
 
   const login = useCallback(async (username, password) => {

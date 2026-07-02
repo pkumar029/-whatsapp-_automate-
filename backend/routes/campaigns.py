@@ -11,23 +11,24 @@ from models.schemas import (
     CampaignCreate, CampaignUpdate, CampaignResponse, CampaignListResponse, JobListResponse
 )
 from services import queue_service
+from dependencies import current_user_id
 
 router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
 
 
-def _active_wa_account(db: Session) -> Optional[str]:
+def _active_wa_account(db: Session, user_id: int) -> Optional[str]:
     """Return the phone of the currently connected WhatsApp session, or None."""
     from models.models import WhatsappSession, SessionStatus as SS
-    session = db.query(WhatsappSession).filter(WhatsappSession.status == SS.connected).first()
+    session = db.query(WhatsappSession).filter(WhatsappSession.user_id == user_id, WhatsappSession.status == SS.connected).first()
     return session.phone if session else None
 
 
 @router.post("", response_model=CampaignResponse, status_code=201)
-async def create_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
+async def create_campaign(data: CampaignCreate, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Create a campaign and bulk schedule message jobs."""
     try:
-        wa_account = _active_wa_account(db)
-        return queue_service.create_campaign(db, data, wa_account=wa_account)
+        wa_account = _active_wa_account(db, user_id)
+        return queue_service.create_campaign(db, data, user_id, wa_account=wa_account)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -39,12 +40,13 @@ async def list_campaigns(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     wa_account: Optional[str] = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user_id: int = Depends(current_user_id),
 ):
     """List campaigns with pagination, filtered by WhatsApp account."""
     if not wa_account:
-        wa_account = _active_wa_account(db)
-    query = db.query(Campaign)
+        wa_account = _active_wa_account(db, user_id)
+    query = db.query(Campaign).filter(Campaign.user_id == user_id)
     if wa_account:
         query = query.filter(Campaign.wa_account == wa_account)
     total = query.count()
@@ -53,18 +55,18 @@ async def list_campaigns(
 
 
 @router.get("/{campaign_id}", response_model=CampaignResponse)
-async def get_campaign(campaign_id: int, db: Session = Depends(get_db)):
+async def get_campaign(campaign_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Get detail progress statistics for a single campaign."""
-    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.user_id == user_id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
     return campaign
 
 
 @router.put("/{campaign_id}", response_model=CampaignResponse)
-async def update_campaign(campaign_id: int, data: CampaignUpdate, db: Session = Depends(get_db)):
+async def update_campaign(campaign_id: int, data: CampaignUpdate, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Edit campaign metadata. Not allowed while campaign is active."""
-    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.user_id == user_id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
     if campaign.status == CampaignStatus.active:
@@ -87,9 +89,9 @@ async def update_campaign(campaign_id: int, data: CampaignUpdate, db: Session = 
 
 
 @router.delete("/{campaign_id}", status_code=204)
-async def delete_campaign(campaign_id: int, db: Session = Depends(get_db)):
+async def delete_campaign(campaign_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Delete a campaign and all its jobs. Not allowed while campaign is active."""
-    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.user_id == user_id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
     if campaign.status == CampaignStatus.active:
@@ -100,9 +102,9 @@ async def delete_campaign(campaign_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{campaign_id}/pause", response_model=CampaignResponse)
-async def pause_campaign(campaign_id: int, db: Session = Depends(get_db)):
+async def pause_campaign(campaign_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Pause campaign execution."""
-    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.user_id == user_id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
     if campaign.status == CampaignStatus.active:
@@ -113,9 +115,9 @@ async def pause_campaign(campaign_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{campaign_id}/resume", response_model=CampaignResponse)
-async def resume_campaign(campaign_id: int, db: Session = Depends(get_db)):
+async def resume_campaign(campaign_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Resume a paused campaign."""
-    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.user_id == user_id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
     if campaign.status == CampaignStatus.paused:
@@ -126,9 +128,9 @@ async def resume_campaign(campaign_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{campaign_id}/cancel", response_model=CampaignResponse)
-async def cancel_campaign(campaign_id: int, db: Session = Depends(get_db)):
+async def cancel_campaign(campaign_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Cancel a campaign and cancel all pending/sending jobs."""
-    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.user_id == user_id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
     
@@ -155,9 +157,13 @@ async def get_campaign_jobs(
     phone: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user_id: int = Depends(current_user_id),
 ):
     """List message jobs inside a campaign with filters."""
+    owned = db.query(Campaign.id).filter(Campaign.id == campaign_id, Campaign.user_id == user_id).first()
+    if not owned:
+        raise HTTPException(status_code=404, detail="Campaign not found")
     query = db.query(MessageJob).filter(MessageJob.campaign_id == campaign_id)
     if status:
         query = query.filter(MessageJob.status == status)
@@ -183,15 +189,18 @@ async def get_campaign_jobs(
 
 
 @router.post("/{campaign_id}/jobs/{job_id}/cancel")
-async def cancel_job(campaign_id: int, job_id: int, db: Session = Depends(get_db)):
+async def cancel_job(campaign_id: int, job_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Cancel an individual queued job."""
+    owned = db.query(Campaign.id).filter(Campaign.id == campaign_id, Campaign.user_id == user_id).first()
+    if not owned:
+        raise HTTPException(status_code=404, detail="Campaign not found")
     job = db.query(MessageJob).filter(
         MessageJob.id == job_id,
         MessageJob.campaign_id == campaign_id
     ).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-        
+
     if job.status in [JobStatus.queued, JobStatus.sending]:
         job.status = JobStatus.cancelled
         job.lock_time = None
@@ -200,26 +209,28 @@ async def cancel_job(campaign_id: int, job_id: int, db: Session = Depends(get_db
 
 
 @router.post("/{campaign_id}/jobs/{job_id}/retry")
-async def retry_job(campaign_id: int, job_id: int, db: Session = Depends(get_db)):
+async def retry_job(campaign_id: int, job_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Force retry a failed or cancelled message job."""
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.user_id == user_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
     job = db.query(MessageJob).filter(
         MessageJob.id == job_id,
         MessageJob.campaign_id == campaign_id
     ).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-        
+
     job.status = JobStatus.queued
     job.retry_count = 0
     job.next_retry_time = None
     job.lock_time = None
     job.failure_reason = None
     job.scheduled_at = datetime.utcnow()
-    
+
     # Reactivate the parent campaign if it was completed or cancelled
-    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
-    if campaign and campaign.status in [CampaignStatus.completed, CampaignStatus.cancelled]:
+    if campaign.status in [CampaignStatus.completed, CampaignStatus.cancelled]:
         campaign.status = CampaignStatus.active
-        
+
     db.commit()
     return {"success": True, "message": "Job scheduled for retry"}

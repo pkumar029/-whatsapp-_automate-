@@ -13,15 +13,16 @@ from services import whatsapp_service
 logger = logging.getLogger(__name__)
 
 
-def _active_account(db: Session) -> Optional[str]:
-    """Return the phone of the currently connected WhatsApp account."""
+def _active_account(db: Session, user_id: int) -> Optional[str]:
+    """Return the phone of this user's currently connected WhatsApp account."""
     from models.models import WhatsappSession, SessionStatus
-    s = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
+    s = db.query(WhatsappSession).filter(WhatsappSession.user_id == user_id, WhatsappSession.status == SessionStatus.connected).first()
     return s.phone if s else None
 
 
 def get_messages(
     db: Session,
+    user_id: int,
     page: int = 1,
     limit: int = 20,
     search: Optional[str] = None,
@@ -32,7 +33,7 @@ def get_messages(
     if not wa_account and not contact_id:
         return {"messages": [], "total": 0, "page": page, "limit": limit}
 
-    query = db.query(Message)
+    query = db.query(Message).filter(Message.user_id == user_id)
 
     if contact_id:
         query = query.filter(Message.contact_id == contact_id)
@@ -70,23 +71,26 @@ def get_messages(
     return {"messages": result, "total": total, "page": page, "limit": limit}
 
 
-def send_message(db: Session, data: MessageSend) -> Message:
+def send_message(db: Session, data: MessageSend, user_id: int) -> Message:
     """Validate, send via WhatsApp, and save message record."""
     phone = data.phone
     contact_id = data.contact_id
+    contact = None
 
-    if contact_id and not phone:
-        contact = db.query(Contact).filter(Contact.id == contact_id).first()
+    if contact_id:
+        contact = db.query(Contact).filter(Contact.id == contact_id, Contact.user_id == user_id).first()
         if not contact:
             raise ValueError(f"Contact ID {contact_id} not found")
-        phone = contact.phone
+        if not phone:
+            phone = contact.phone
 
     if not phone:
         raise ValueError("Phone number is required")
 
-    wa_account = _active_account(db)
+    wa_account = _active_account(db, user_id)
 
     msg = Message(
+        user_id=user_id,
         contact_id=contact_id,
         phone=phone,
         wa_account=wa_account,
@@ -101,7 +105,7 @@ def send_message(db: Session, data: MessageSend) -> Message:
     db.refresh(msg)
 
     try:
-        result = whatsapp_service.send_whatsapp_message(db, phone, data.message)
+        result = whatsapp_service.send_whatsapp_message(db, phone, data.message, user_id, contact=contact)
         msg.status = MessageStatus.sent
         msg.whatsapp_message_id = result.get("message_id")
         msg.sent_at = datetime.utcnow()
@@ -115,7 +119,7 @@ def send_message(db: Session, data: MessageSend) -> Message:
     return msg
 
 
-def sync_message_history(db: Session) -> dict:
+def sync_message_history(db: Session, user_id: int) -> dict:
     """
     Fetch chat + message history from the bridge and store in the DB.
     Deduplicates by whatsapp_message_id — safe to call repeatedly.
@@ -124,7 +128,7 @@ def sync_message_history(db: Session) -> dict:
     import re as _re
     from services.contacts_service import get_contact_by_phone
 
-    wa_account = _active_account(db)
+    wa_account = _active_account(db, user_id)
     if not wa_account:
         return {"success": False, "message": "No active WhatsApp account"}
 
@@ -160,12 +164,13 @@ def sync_message_history(db: Session) -> dict:
             continue
 
         # Resolve or create contact
-        contact = get_contact_by_phone(db, phone)
+        contact = get_contact_by_phone(db, phone, user_id)
         if not contact:
             # Auto-created from chat history — not a saved address-book contact.
             # is_valid=True so the conversation appears in Messages; is_my_contact=False
             # keeps it out of the Contacts page.
             contact = Contact(
+                user_id=user_id,
                 name=name, phone=phone,
                 wa_account=wa_account,
                 is_valid=True, is_my_contact=False,
@@ -193,7 +198,8 @@ def sync_message_history(db: Session) -> dict:
             # Dedup by WhatsApp message ID
             if wa_msg_id:
                 exists = db.query(Message.id).filter(
-                    Message.whatsapp_message_id == wa_msg_id
+                    Message.whatsapp_message_id == wa_msg_id,
+                    Message.user_id == user_id,
                 ).first()
                 if exists:
                     messages_skipped += 1
@@ -203,6 +209,7 @@ def sync_message_history(db: Session) -> dict:
             sent_at = datetime.utcfromtimestamp(ts / 1000) if ts else datetime.utcnow()
 
             msg = Message(
+                user_id=user_id,
                 contact_id=contact.id,
                 phone=phone,
                 wa_account=wa_account,
@@ -232,22 +239,22 @@ def sync_message_history(db: Session) -> dict:
     }
 
 
-def get_sent_count(db: Session, wa_account: Optional[str] = None) -> int:
-    q = db.query(func.count(Message.id)).filter(Message.status == MessageStatus.sent)
+def get_sent_count(db: Session, user_id: int, wa_account: Optional[str] = None) -> int:
+    q = db.query(func.count(Message.id)).filter(Message.user_id == user_id, Message.status == MessageStatus.sent)
     if wa_account:
         q = q.filter(Message.wa_account == wa_account)
     return q.scalar() or 0
 
 
-def get_failed_count(db: Session, wa_account: Optional[str] = None) -> int:
-    q = db.query(func.count(Message.id)).filter(Message.status == MessageStatus.failed)
+def get_failed_count(db: Session, user_id: int, wa_account: Optional[str] = None) -> int:
+    q = db.query(func.count(Message.id)).filter(Message.user_id == user_id, Message.status == MessageStatus.failed)
     if wa_account:
         q = q.filter(Message.wa_account == wa_account)
     return q.scalar() or 0
 
 
-def get_received_count(db: Session, wa_account: Optional[str] = None) -> int:
-    q = db.query(func.count(Message.id)).filter(Message.direction == MessageDirection.inbound)
+def get_received_count(db: Session, user_id: int, wa_account: Optional[str] = None) -> int:
+    q = db.query(func.count(Message.id)).filter(Message.user_id == user_id, Message.direction == MessageDirection.inbound)
     if wa_account:
         q = q.filter(Message.wa_account == wa_account)
     return q.scalar() or 0

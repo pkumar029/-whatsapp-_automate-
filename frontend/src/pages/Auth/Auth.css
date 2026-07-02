@@ -145,6 +145,16 @@
   font-size: 0.78rem;
 }
 
+.auth-hint a {
+  color: var(--accent-primary, #25D366);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.auth-hint a:hover {
+  text-decoration: underline;
+}
+
 /* ── Welcome page ─────────────────────────────── */
 .welcome-card {
   width: 100%;

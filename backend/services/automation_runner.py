@@ -15,10 +15,57 @@ from models.models import (
 
 logger = logging.getLogger(__name__)
 
+_MAX_SEND_RETRIES = 3
+_RETRY_DELAY_SECONDS = 3
+
 
 class StepExecutionError(Exception):
     """Raised when a step execution fails."""
     pass
+
+
+def _send_message_with_retry(db: Session, msg: Message, phone: str, body: str, contact: Optional[Contact], user_id: int) -> bool:
+    """Send `msg`, retrying retryable failures (e.g. bridge unavailable) up to
+    _MAX_SEND_RETRIES times with a short delay between attempts. Permanent
+    failures (not connected, invalid number, blocked contact, bad message)
+    are not retried. Mutates msg.status/error_message/retry_count/sent_at in
+    place; never raises — check the return value / msg.status instead.
+    """
+    from services import whatsapp_service
+
+    last_error = None
+    for attempt in range(1, _MAX_SEND_RETRIES + 1):
+        msg.status = MessageStatus.sending
+        msg.retry_count = attempt - 1
+        db.flush()
+        try:
+            whatsapp_service.send_whatsapp_message(db, phone, body, user_id, contact=contact)
+            msg.status = MessageStatus.sent
+            msg.sent_at = datetime.utcnow()
+            msg.error_message = None
+            db.flush()
+            return True
+        except Exception as send_err:
+            last_error = send_err
+            msg.retry_count = attempt
+            retryable = getattr(send_err, "retryable", False)
+            logger.warning(
+                f"Send attempt {attempt}/{_MAX_SEND_RETRIES} to {phone} failed "
+                f"(retryable={retryable}): {send_err}"
+            )
+            if not retryable or attempt == _MAX_SEND_RETRIES:
+                break
+            time.sleep(_RETRY_DELAY_SECONDS)
+
+    msg.status = MessageStatus.failed
+    msg.error_message = str(last_error)
+    db.flush()
+    logger.error(
+        f"Message send FAILED — Recipient: {phone}  Retries: {msg.retry_count}  Reason: {last_error}"
+    )
+    return False
+
+
 def _render_template(template_str: str, contact: Optional[Contact], context: Dict[str, Any]) -> str:
     if not template_str:
         return ""
@@ -55,12 +102,14 @@ def execute_step(db: Session, step: AutomationStep, context: Dict[str, Any]) -> 
         message_template = config.get("message", "Hello!")
         target_type = config.get("target_type", "single")
 
+        automation_owner_id = context.get("user_id")
+
         if target_type == "group":
             target_tag = config.get("target_tag", "")
             stagger_seconds = int(config.get("stagger_seconds", 5))
 
-            # Query candidate contacts
-            query = db.query(Contact).filter(Contact.is_active == True)
+            # Query candidate contacts (scoped to this automation's owner)
+            query = db.query(Contact).filter(Contact.user_id == automation_owner_id, Contact.is_active == True)
             if target_tag == "all":
                 contacts_list = query.all()
             elif target_tag == "whatsapp_groups":
@@ -91,6 +140,7 @@ def execute_step(db: Session, step: AutomationStep, context: Dict[str, Any]) -> 
 
                 phone = contact.phone
                 msg = Message(
+                    user_id=automation_owner_id,
                     phone=phone,
                     contact_id=contact.id,
                     direction=MessageDirection.outbound,
@@ -101,34 +151,25 @@ def execute_step(db: Session, step: AutomationStep, context: Dict[str, Any]) -> 
                 db.add(msg)
                 db.flush()
 
-                try:
-                    from services import whatsapp_service
-                    whatsapp_service.send_whatsapp_message(db, phone, body)
-                    msg.status = MessageStatus.sent
-                    msg.sent_at = datetime.utcnow()
-                    db.flush()
-                except Exception as send_err:
-                    msg.status = MessageStatus.failed
-                    msg.error_message = str(send_err)
-                    db.flush()
-                    logger.error(f"Failed to send scheduled message to {phone}: {send_err}")
-            
+                _send_message_with_retry(db, msg, phone, body, contact, automation_owner_id)
+
             db.commit()
             return context
         else:
             phone = context.get("phone") or config.get("phone")
             
-            # Resolve contact by ID or Phone number
+            # Resolve contact by ID or Phone number (scoped to this automation's owner)
             contact = context.get("contact")
             if not contact:
                 contact_id_val = context.get("contact_id")
                 if contact_id_val:
-                    contact = db.query(Contact).filter(Contact.id == contact_id_val).first()
+                    contact = db.query(Contact).filter(Contact.id == contact_id_val, Contact.user_id == automation_owner_id).first()
                 elif phone:
                     clean_phone = "".join(filter(str.isdigit, phone))
                     if clean_phone:
                         contact = db.query(Contact).filter(
-                            (Contact.phone == phone) | 
+                            Contact.user_id == automation_owner_id,
+                            (Contact.phone == phone) |
                             (Contact.phone.like(f"%{clean_phone}"))
                         ).first()
                 
@@ -138,34 +179,36 @@ def execute_step(db: Session, step: AutomationStep, context: Dict[str, Any]) -> 
 
             message_template = _render_template(message_template, contact, context)
 
-            if phone:
-                # Save message record
-                msg = Message(
-                    phone=phone,
-                    contact_id=context.get("contact_id"),
-                    direction=MessageDirection.outbound,
-                    content=message_template,
-                    status=MessageStatus.pending,
-                    automation_id=context.get("automation_id"),
+            if not phone:
+                raise StepExecutionError(
+                    "❌ No recipient — couldn't resolve a phone number or contact for this step."
                 )
-                db.add(msg)
-                db.flush()
-                
-                try:
-                    from services import whatsapp_service
-                    whatsapp_service.send_whatsapp_message(db, phone, message_template)
-                    msg.status = MessageStatus.sent
-                    msg.sent_at = datetime.utcnow()
-                    db.flush()
-                    logger.info(f"Message successfully sent to {phone} via automation")
-                except Exception as send_err:
-                    msg.status = MessageStatus.failed
-                    msg.error_message = str(send_err)
-                    db.flush()
-                    logger.error(f"Failed to send automation message: {send_err}")
-                    raise StepExecutionError(f"Failed to send WhatsApp message: {send_err}")
-                    
-                context["last_message_id"] = msg.id
+
+            # Save message record
+            msg = Message(
+                user_id=automation_owner_id,
+                phone=phone,
+                contact_id=context.get("contact_id"),
+                direction=MessageDirection.outbound,
+                content=message_template,
+                status=MessageStatus.pending,
+                automation_id=context.get("automation_id"),
+            )
+            db.add(msg)
+            db.flush()
+
+            success = _send_message_with_retry(db, msg, phone, message_template, contact, automation_owner_id)
+            db.commit()
+            if not success:
+                raise StepExecutionError(
+                    f"Automation: {context.get('automation_name', context.get('automation_id'))}\n"
+                    f"Recipient: {phone}\n"
+                    f"Status: FAILED\n"
+                    f"Reason: {msg.error_message}\n"
+                    f"Retries: {msg.retry_count}"
+                )
+            logger.info(f"Message successfully sent to {phone} via automation (retries: {msg.retry_count})")
+            context["last_message_id"] = msg.id
             return context
 
     elif step.step_type == StepType.delay:
@@ -323,6 +366,8 @@ def run_automation(db: Session, automation_id: int, trigger_data: Optional[Dict]
     # Build execution context
     context: Dict[str, Any] = {
         "automation_id": automation_id,
+        "automation_name": automation.name,
+        "user_id": automation.user_id,
         "log_id": log.id,
         "trigger_data": trigger_data or {},
     }

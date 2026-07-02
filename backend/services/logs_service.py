@@ -24,7 +24,7 @@ def get_log_settings(db: Session) -> dict:
     }
 
 
-def save_log_settings(db: Session, logging_enabled: bool, max_log_entries: int) -> dict:
+def save_log_settings(db: Session, logging_enabled: bool, max_log_entries: int, user_id: int) -> dict:
     for key, val in [
         (_LOG_ENABLED_KEY, "true" if logging_enabled else "false"),
         (_LOG_MAX_ENTRIES_KEY, str(max(0, max_log_entries))),
@@ -36,20 +36,28 @@ def save_log_settings(db: Session, logging_enabled: bool, max_log_entries: int) 
             db.add(SystemSettings(key=key, value=val))
     db.commit()
     if max_log_entries > 0:
-        trim_to_limit(db, max_log_entries)
+        trim_to_limit(db, max_log_entries, user_id)
     return get_log_settings(db)
 
 
-def trim_to_limit(db: Session, max_entries: int) -> int:
+def _user_log_ids_query(db: Session, user_id: int):
+    """AutomationLog has no user_id of its own — ownership flows through
+    automation_id — so every log query joins through Automation."""
+    return db.query(AutomationLog).join(Automation, AutomationLog.automation_id == Automation.id).filter(Automation.user_id == user_id)
+
+
+def trim_to_limit(db: Session, max_entries: int, user_id: int) -> int:
+    """Trim this user's oldest logs only — a global trim would let one
+    user's heavy automation usage evict another user's log history."""
     if max_entries <= 0:
         return 0
-    total = db.query(func.count(AutomationLog.id)).scalar()
+    total = _user_log_ids_query(db, user_id).count()
     if total <= max_entries:
         return 0
     excess = total - max_entries
     oldest_ids = [
         row.id for row in
-        db.query(AutomationLog.id)
+        _user_log_ids_query(db, user_id)
           .order_by(AutomationLog.started_at.asc())
           .limit(excess)
           .all()
@@ -60,8 +68,8 @@ def trim_to_limit(db: Session, max_entries: int) -> int:
     return len(oldest_ids)
 
 
-def export_logs_data(db: Session) -> list:
-    logs = db.query(AutomationLog).order_by(AutomationLog.started_at.desc()).all()
+def export_logs_data(db: Session, user_id: int) -> list:
+    logs = _user_log_ids_query(db, user_id).order_by(AutomationLog.started_at.desc()).all()
     result = []
     for log in logs:
         automation = db.query(Automation).filter(Automation.id == log.automation_id).first()
@@ -82,6 +90,7 @@ def export_logs_data(db: Session) -> list:
 
 def get_logs(
     db: Session,
+    user_id: int,
     page: int = 1,
     limit: int = 20,
     search: Optional[str] = None,
@@ -92,9 +101,9 @@ def get_logs(
     cfg = get_log_settings(db)
     max_entries = cfg["max_log_entries"]
     if max_entries > 0:
-        trim_to_limit(db, max_entries)
+        trim_to_limit(db, max_entries, user_id)
 
-    query = db.query(AutomationLog)
+    query = _user_log_ids_query(db, user_id)
 
     if status:
         query = query.filter(AutomationLog.status == status)
@@ -103,7 +112,7 @@ def get_logs(
     if search:
         # Filter by automation name via subquery
         matching_ids = [
-            a.id for a in db.query(Automation).filter(Automation.name.ilike(f"%{search}%")).all()
+            a.id for a in db.query(Automation).filter(Automation.name.ilike(f"%{search}%"), Automation.user_id == user_id).all()
         ]
         query = query.filter(AutomationLog.automation_id.in_(matching_ids))
 
@@ -132,13 +141,14 @@ def get_logs(
     return {"logs": result, "total": total}
 
 
-def get_log_by_id(db: Session, log_id: int) -> Optional[AutomationLog]:
-    return db.query(AutomationLog).filter(AutomationLog.id == log_id).first()
+def get_log_by_id(db: Session, log_id: int, user_id: int) -> Optional[AutomationLog]:
+    return _user_log_ids_query(db, user_id).filter(AutomationLog.id == log_id).first()
 
 
-def clear_logs(db: Session) -> int:
-    count = db.query(AutomationLog).count()
-    db.query(AutomationLog).delete()
-    db.commit()
-    logger.info(f"Cleared {count} log entries")
-    return count
+def clear_logs(db: Session, user_id: int) -> int:
+    ids = [row.id for row in _user_log_ids_query(db, user_id).with_entities(AutomationLog.id).all()]
+    if ids:
+        db.query(AutomationLog).filter(AutomationLog.id.in_(ids)).delete(synchronize_session=False)
+        db.commit()
+    logger.info(f"Cleared {len(ids)} log entries for user {user_id}")
+    return len(ids)

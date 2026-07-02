@@ -26,6 +26,7 @@ class MessageDirection(str, enum.Enum):
 
 class MessageStatus(str, enum.Enum):
     pending = "pending"
+    sending = "sending"
     sent = "sent"
     delivered = "delivered"
     read = "read"
@@ -131,6 +132,7 @@ class Contact(Base):
     __tablename__ = "contacts"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     name = Column(String(100), nullable=False)
     phone = Column(String(100), nullable=False)
     email = Column(String(150), nullable=True)
@@ -153,6 +155,7 @@ class Contact(Base):
         Index("idx_contact_active", "is_active"),
         Index("idx_contact_valid", "is_valid"),
         Index("idx_contact_wa_account", "wa_account"),
+        Index("idx_contact_user", "user_id"),
     )
 
 
@@ -161,6 +164,7 @@ class Message(Base):
     __tablename__ = "messages"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     contact_id = Column(Integer, ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True)
     phone = Column(String(100), nullable=False)
     wa_account = Column(String(100), nullable=True)   # owning WhatsApp number
@@ -172,6 +176,7 @@ class Message(Base):
     whatsapp_message_id = Column(String(200), nullable=True)
     automation_id = Column(Integer, ForeignKey("automations.id", ondelete="SET NULL"), nullable=True)
     error_message = Column(Text, nullable=True)
+    retry_count = Column(Integer, default=0, nullable=False)
     sent_at = Column(DateTime, nullable=True)
     delivered_at = Column(DateTime, nullable=True)
     read_at = Column(DateTime, nullable=True)
@@ -188,6 +193,7 @@ class Message(Base):
         Index("idx_message_contact", "contact_id"),
         Index("idx_message_created", "created_at"),
         Index("idx_message_wa_id", "whatsapp_message_id"),
+        Index("idx_message_user", "user_id"),
     )
 
 
@@ -196,6 +202,7 @@ class Automation(Base):
     __tablename__ = "automations"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     name = Column(String(150), nullable=False)
     wa_account = Column(String(100), nullable=True)
     description = Column(Text, nullable=True)
@@ -215,6 +222,7 @@ class Automation(Base):
         Index("idx_automation_active", "is_active"),
         Index("idx_automation_trigger", "trigger_type"),
         Index("idx_automation_wa_account", "wa_account"),
+        Index("idx_automation_user", "user_id"),
     )
 
 
@@ -271,6 +279,7 @@ class Campaign(Base):
     __tablename__ = "campaigns"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     name = Column(String(150), nullable=False)
     wa_account = Column(String(100), nullable=True)
     status = Column(Enum(CampaignStatus), default=CampaignStatus.active, nullable=False)
@@ -287,6 +296,7 @@ class Campaign(Base):
     __table_args__ = (
         Index("idx_campaigns_status", "status"),
         Index("idx_campaigns_wa_account", "wa_account"),
+        Index("idx_campaigns_user", "user_id"),
     )
 
 
@@ -297,6 +307,22 @@ class SystemSettings(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     key = Column(String(100), unique=True, nullable=False, index=True)
     value = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ─── Per-user AI Settings ───────────────────────────────────────
+class UserAISettings(Base):
+    __tablename__ = "user_ai_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
+    provider = Column(String(50), nullable=True)
+    api_key = Column(Text, nullable=True)
+    tone = Column(String(50), nullable=True)
+    language = Column(String(20), nullable=True)
+    model = Column(String(100), nullable=True)
+    enabled = Column(Boolean, default=False, nullable=False)
+    auto_suggest = Column(Boolean, default=False, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
@@ -341,6 +367,7 @@ class WhatsAppProfile(Base):
     __tablename__ = "whatsapp_profiles"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     wa_account = Column(String(100), unique=True, nullable=False)  # the phone number
     display_name = Column(String(200), nullable=True)
     profile_pic_url = Column(Text, nullable=True)

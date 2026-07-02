@@ -7,8 +7,9 @@ from sqlalchemy.orm import Session
 from database.connection import get_db
 from services import contacts_service, messages_service, automations_service
 from models.schemas import DashboardSummary
-from models.models import AutomationLog, LogStatus, Campaign, CampaignStatus, MessageJob, JobStatus
+from models.models import AutomationLog, LogStatus, Campaign, CampaignStatus, MessageJob, JobStatus, Automation
 from sqlalchemy import func
+from dependencies import current_user_id
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -16,42 +17,42 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 @router.get("/summary", response_model=DashboardSummary)
 async def get_summary(
     wa_account: Optional[str] = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user_id: int = Depends(current_user_id),
 ):
-    """Get dashboard summary statistics, scoped to the given WhatsApp account."""
+    """Get dashboard summary statistics, scoped to the current user (and given WhatsApp account)."""
     if not wa_account:
         from models.models import WhatsappSession, SessionStatus
-        session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
+        session = db.query(WhatsappSession).filter(WhatsappSession.user_id == user_id, WhatsappSession.status == SessionStatus.connected).first()
         wa_account = session.phone if session else None
 
-    total_contacts = contacts_service.get_total_contacts(db, wa_account)
-    sent_messages = messages_service.get_sent_count(db, wa_account)
-    received_messages = messages_service.get_received_count(db, wa_account)
-    failed_messages = messages_service.get_failed_count(db, wa_account)
-    active_automations = automations_service.get_active_automations_count(db, wa_account)
-    
-    # Active campaigns and queued message jobs — scoped to the connected account
-    campaign_q = db.query(func.count(Campaign.id)).filter(Campaign.status == CampaignStatus.active)
+    total_contacts = contacts_service.get_total_contacts(db, user_id, wa_account)
+    sent_messages = messages_service.get_sent_count(db, user_id, wa_account)
+    received_messages = messages_service.get_received_count(db, user_id, wa_account)
+    failed_messages = messages_service.get_failed_count(db, user_id, wa_account)
+    active_automations = automations_service.get_active_automations_count(db, user_id, wa_account)
+
+    # Active campaigns and queued message jobs — scoped to this user
+    campaign_q = db.query(func.count(Campaign.id)).filter(Campaign.user_id == user_id, Campaign.status == CampaignStatus.active)
     if wa_account:
         campaign_q = campaign_q.filter(Campaign.wa_account == wa_account)
     active_campaigns = campaign_q.scalar() or 0
 
-    # Queued jobs: join to campaigns so we can scope by wa_account
+    # Queued jobs: join to campaigns so we can scope by user_id/wa_account
     jobs_q = db.query(func.count(MessageJob.id)).join(
-        Campaign, MessageJob.campaign_id == Campaign.id, isouter=True
-    ).filter(MessageJob.status == JobStatus.queued)
+        Campaign, MessageJob.campaign_id == Campaign.id
+    ).filter(MessageJob.status == JobStatus.queued, Campaign.user_id == user_id)
     if wa_account:
-        jobs_q = jobs_q.filter(
-            (Campaign.wa_account == wa_account) | Campaign.id.is_(None)
-        )
+        jobs_q = jobs_q.filter(Campaign.wa_account == wa_account)
     queued_jobs = jobs_q.scalar() or 0
 
     # Recent activity from logs
-    recent_logs = db.query(AutomationLog).order_by(
+    recent_logs = db.query(AutomationLog).join(
+        Automation, AutomationLog.automation_id == Automation.id
+    ).filter(Automation.user_id == user_id).order_by(
         AutomationLog.started_at.desc()
     ).limit(5).all()
 
-    from models.models import Automation
     recent_activity = []
     for log in recent_logs:
         automation = db.query(Automation).filter(Automation.id == log.automation_id).first()

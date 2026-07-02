@@ -11,14 +11,15 @@ from sqlalchemy.orm import Session
 from database.connection import get_db
 from services import whatsapp_service
 from models.schemas import WhatsAppSendRequest, WhatsAppStatusResponse, WhatsAppConnectResponse, WhatsAppConnectRequest
+from dependencies import current_user_id
 
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp"])
 
 
 @router.get("/status", response_model=WhatsAppStatusResponse)
-async def get_status(db: Session = Depends(get_db)):
+async def get_status(db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Get current WhatsApp session status."""
-    return whatsapp_service.get_session_status(db)
+    return whatsapp_service.get_session_status(db, user_id)
 
 
 @router.get("/events")
@@ -85,19 +86,19 @@ async def whatsapp_events(request: Request):
 
 
 @router.post("/connect", response_model=WhatsAppConnectResponse)
-async def connect(data: WhatsAppConnectRequest, db: Session = Depends(get_db)):
+async def connect(data: WhatsAppConnectRequest, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Initiate WhatsApp connection with specific configuration."""
     try:
-        return whatsapp_service.connect_whatsapp_with_config(db, data)
+        return whatsapp_service.connect_whatsapp_with_config(db, data, user_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/disconnect")
-async def disconnect(db: Session = Depends(get_db)):
+async def disconnect(db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Disconnect WhatsApp session."""
     try:
-        return whatsapp_service.disconnect_whatsapp(db)
+        return whatsapp_service.disconnect_whatsapp(db, user_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -110,22 +111,22 @@ async def clear_session():
 
 
 @router.get("/profile")
-async def get_whatsapp_profile(db: Session = Depends(get_db)):
+async def get_whatsapp_profile(db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Get the connected WhatsApp account's own profile (name, phone, picture).
     Fetches fresh from the bridge and upserts in DB; falls back to stored record."""
     from models.models import WhatsappSession, SessionStatus as SS
-    session = db.query(WhatsappSession).filter(WhatsappSession.status == SS.connected).first()
+    session = db.query(WhatsappSession).filter(WhatsappSession.user_id == user_id, WhatsappSession.status == SS.connected).first()
     if not session or not session.phone:
         return {"success": False, "detail": "No active WhatsApp session"}
     from services.profile_service import fetch_and_save_profile
-    return fetch_and_save_profile(db, session.phone)
+    return fetch_and_save_profile(db, session.phone, user_id)
 
 
 @router.post("/send")
-async def send_message(data: WhatsAppSendRequest, db: Session = Depends(get_db)):
+async def send_message(data: WhatsAppSendRequest, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Send a WhatsApp message directly."""
     try:
-        return whatsapp_service.send_whatsapp_message(db, data.phone, data.message)
+        return whatsapp_service.send_whatsapp_message(db, data.phone, data.message, user_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -133,19 +134,19 @@ async def send_message(data: WhatsAppSendRequest, db: Session = Depends(get_db))
 
 
 @router.get("/qr")
-async def get_qr(db: Session = Depends(get_db)):
+async def get_qr(db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Get current QR code if available."""
     from models.models import WhatsappSession
-    session = db.query(WhatsappSession).order_by(WhatsappSession.id.desc()).first()
+    session = db.query(WhatsappSession).filter(WhatsappSession.user_id == user_id).order_by(WhatsappSession.id.desc()).first()
     if not session or not session.qr_code:
         raise HTTPException(status_code=404, detail="No QR code available")
     return {"qr": session.qr_code}
 
 
 @router.post("/dev/connect")
-async def dev_connect(phone: str = "+91 9876543210", db: Session = Depends(get_db)):
+async def dev_connect(phone: str = "+91 9876543210", db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """DEV ONLY: Mark session as connected without QR scan."""
-    return whatsapp_service.simulate_connected(db, phone)
+    return whatsapp_service.simulate_connected(db, user_id, phone)
 
 
 from pydantic import BaseModel
@@ -163,25 +164,41 @@ class WebhookPayload(BaseModel):
 
 @router.post("/webhook")
 async def whatsapp_webhook(payload: WebhookPayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    """Receive inbound messages from WhatsApp bridge."""
+    """Receive inbound messages from WhatsApp bridge.
+
+    Called by the Node bridge itself, not an authenticated browser — there's
+    no JWT here. Until Phase 3 (per-user bridge sessions) lands, only one
+    user can be genuinely connected via the bridge at a time, so "the"
+    connected session IS the message's owner. That owner's user_id is then
+    threaded through contact/message creation and automation matching so
+    nothing here leaks across users even once multiple sessions exist.
+    """
     try:
         phone = payload.phone
         content = payload.content
-        
+
+        active_session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
+        owner_user_id = active_session.user_id if active_session else None
+        wa_account = active_session.phone if active_session else None
+
+        if owner_user_id is None:
+            logger.warning(f"Webhook message from {phone} dropped — no connected WhatsApp session to attribute it to")
+            return {"success": False, "error": "No connected WhatsApp session"}
+
         # 1. Resolve contact by phone
         from services import contacts_service
-        contact = contacts_service.get_contact_by_phone(db, phone)
+        contact = contacts_service.get_contact_by_phone(db, phone, owner_user_id, wa_account)
         if not contact:
             # Auto-create a minimal contact so the message has a foreign-key target.
             # is_my_contact=False keeps it off the Contacts page (not in address book);
             # is_valid=True so the conversation still appears in the Messages page.
             from models.models import Contact as ContactModel
-            active_session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
             contact = ContactModel(
+                user_id=owner_user_id,
                 name=payload.name or f"WhatsApp User {phone}",
                 phone=phone,
                 tags=payload.tags or [],
-                wa_account=active_session.phone if active_session else None,
+                wa_account=wa_account,
                 is_valid=True,
                 is_my_contact=False,
             )
@@ -191,11 +208,9 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
         else:
             needs_save = False
             # Backfill wa_account if missing (legacy contact or created before account field existed)
-            if not contact.wa_account:
-                active_session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
-                if active_session:
-                    contact.wa_account = active_session.phone
-                    needs_save = True
+            if not contact.wa_account and wa_account:
+                contact.wa_account = wa_account
+                needs_save = True
             # Update placeholder name with real name from WhatsApp
             if payload.name and (contact.name.startswith("WhatsApp User") or contact.name.startswith("Unnamed") or contact.name == contact.phone):
                 contact.name = payload.name
@@ -204,11 +219,10 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
                 db.add(contact)
                 db.commit()
                 db.refresh(contact)
-            
+
         # 2. Save message
-        active_session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
-        wa_account = active_session.phone if active_session else None
         msg = Message(
+            user_id=owner_user_id,
             contact_id=contact.id,
             phone=phone,
             wa_account=wa_account,
@@ -221,13 +235,13 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
         db.add(msg)
         db.commit()
         db.refresh(msg)
-        
+
         logger.info(f"Webhook received and saved message from {phone} ({contact.name})")
 
-        # Push real-time event to all SSE subscribers
+        # Push real-time event to this user's SSE subscribers only
         try:
             from routes.messages import broadcast_message_event
-            broadcast_message_event({
+            broadcast_message_event(owner_user_id, {
                 "type": "new_message",
                 "id": msg.id,
                 "contact_id": contact.id,
@@ -240,13 +254,14 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
         except Exception:
             pass
 
-        # 3. Trigger matching active automations in background
+        # 3. Trigger matching active automations (this user's only) in background
         from models.models import Automation, TriggerType
         from services.automation_runner import run_automation
         from database.connection import SessionLocal
 
         active_automations = db.query(Automation).filter(
-            Automation.is_active == True
+            Automation.is_active == True,
+            Automation.user_id == owner_user_id,
         ).filter(
             (Automation.wa_account == wa_account) | Automation.wa_account.is_(None)
         ).all()

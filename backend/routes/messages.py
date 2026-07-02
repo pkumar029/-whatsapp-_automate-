@@ -12,26 +12,31 @@ from sqlalchemy.orm import Session
 from database.connection import get_db
 from services import messages_service
 from models.schemas import MessageSend, MessageListResponse
+from dependencies import current_user_id
 
 router = APIRouter(prefix="/messages", tags=["Messages"])
 
-# ─── SSE broadcaster ────────────────────────────────────────────
-_sse_queues: list[asyncio.Queue] = []
+# ─── SSE broadcaster (per user) ─────────────────────────────────
+# Keyed by user_id — public endpoint (EventSource can't send auth headers),
+# so message *content* would otherwise leak to every connected browser tab
+# regardless of who it belongs to.
+_sse_queues: dict[int, list[asyncio.Queue]] = {}
 
-def broadcast_message_event(data: dict) -> None:
-    """Push a new-message event to all connected SSE clients."""
+def broadcast_message_event(user_id: int, data: dict) -> None:
+    """Push a new-message event to this user's connected SSE clients only."""
     payload = json.dumps(data)
-    for q in _sse_queues[:]:
+    for q in _sse_queues.get(user_id, [])[:]:
         try:
             q.put_nowait(payload)
         except asyncio.QueueFull:
             pass
 
 @router.get("/stream")
-async def message_stream(request: Request):
-    """Server-Sent Events endpoint — pushes new inbound messages in real-time."""
+async def message_stream(request: Request, user_id: int = Query(...)):
+    """Server-Sent Events endpoint — pushes new inbound messages in real-time,
+    scoped to the requesting user via a query param (see broadcaster note above)."""
     queue: asyncio.Queue = asyncio.Queue(maxsize=100)
-    _sse_queues.append(queue)
+    _sse_queues.setdefault(user_id, []).append(queue)
 
     async def generator():
         try:
@@ -45,7 +50,7 @@ async def message_stream(request: Request):
                     yield ": ping\n\n"   # keep connection alive
         finally:
             try:
-                _sse_queues.remove(queue)
+                _sse_queues.get(user_id, []).remove(queue)
             except ValueError:
                 pass
 
@@ -67,31 +72,34 @@ async def list_messages(
     search: Optional[str] = Query(None),
     direction: Optional[str] = Query(None, pattern="^(inbound|outbound)$"),
     contact_id: Optional[int] = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user_id: int = Depends(current_user_id),
 ):
     """List messages with filtering and pagination."""
     from models.models import WhatsappSession, SessionStatus
-    session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
+    session = db.query(WhatsappSession).filter(
+        WhatsappSession.user_id == user_id, WhatsappSession.status == SessionStatus.connected
+    ).first()
     wa_account = session.phone if session else None
-    
+
     return messages_service.get_messages(
-        db, page=page, limit=limit, search=search,
+        db, user_id, page=page, limit=limit, search=search,
         direction=direction, contact_id=contact_id, wa_account=wa_account
     )
 @router.post("/sync")
-async def sync_messages(db: Session = Depends(get_db)):
+async def sync_messages(db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Pull full chat + message history from the bridge for the active account."""
-    result = messages_service.sync_message_history(db)
+    result = messages_service.sync_message_history(db, user_id)
     if not result.get("success"):
         raise HTTPException(status_code=503, detail=result.get("message", "Sync failed"))
     return result
 
 
 @router.post("/send", status_code=201)
-async def send_message(data: MessageSend, db: Session = Depends(get_db)):
+async def send_message(data: MessageSend, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Send a WhatsApp message."""
     try:
-        msg = messages_service.send_message(db, data)
+        msg = messages_service.send_message(db, data, user_id)
         return {"success": True, "message_id": msg.id, "status": msg.status.value}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -104,17 +112,18 @@ async def messages_by_contact(
     contact_id: int,
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=500),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user_id: int = Depends(current_user_id),
 ):
     """Get all messages for a specific contact."""
-    return messages_service.get_messages(db, page=page, limit=limit, contact_id=contact_id)
+    return messages_service.get_messages(db, user_id, page=page, limit=limit, contact_id=contact_id)
 
 
 @router.get("/{message_id:int}")
-async def get_message(message_id: int, db: Session = Depends(get_db)):
+async def get_message(message_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Get a single message by ID."""
     from models.models import Message
-    msg = db.query(Message).filter(Message.id == message_id).first()
+    msg = db.query(Message).filter(Message.id == message_id, Message.user_id == user_id).first()
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
     return msg

@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from database.connection import get_db
+from dependencies import current_user_id
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 
@@ -39,10 +40,10 @@ class AISettingsUpdate(BaseModel):
 # ─── Settings ─────────────────────────────────────────────────────
 
 @router.get("/settings")
-async def get_ai_settings(db: Session = Depends(get_db)):
+async def get_ai_settings(db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Return current AI settings. The raw API key is never exposed — only a masked preview."""
     from services.ai_service import get_ai_settings as _get
-    s = _get(db)
+    s = _get(db, user_id)
     raw_key = s.pop("api_key", "")
     if raw_key:
         # Show first 4 + last 4 characters, mask the rest
@@ -56,11 +57,11 @@ async def get_ai_settings(db: Session = Depends(get_db)):
 
 
 @router.post("/settings")
-async def update_ai_settings(data: AISettingsUpdate, db: Session = Depends(get_db)):
+async def update_ai_settings(data: AISettingsUpdate, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Persist AI settings. Omit api_key or leave it blank to keep the existing stored key."""
     from services.ai_service import save_ai_settings as _save
     updates = {k: v for k, v in data.model_dump().items() if v is not None}
-    result = _save(db, updates)
+    result = _save(db, user_id, updates)
     result.pop("api_key", None)
     return result
 
@@ -68,11 +69,11 @@ async def update_ai_settings(data: AISettingsUpdate, db: Session = Depends(get_d
 # ─── Reply generation ─────────────────────────────────────────────
 
 @router.post("/reply")
-async def generate_ai_reply(data: AIReplyRequest, db: Session = Depends(get_db)):
+async def generate_ai_reply(data: AIReplyRequest, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Generate a smart reply from conversation history using the configured AI provider."""
     from services.ai_service import generate_reply, get_ai_settings as _get
 
-    stored = _get(db)
+    stored = _get(db, user_id)
     provider = data.provider or stored["provider"]
     api_key = stored["api_key"]
     tone = data.tone or stored["tone"]
@@ -106,10 +107,10 @@ async def generate_ai_reply(data: AIReplyRequest, db: Session = Depends(get_db))
 
 
 @router.post("/test")
-async def test_ai_connection(db: Session = Depends(get_db)):
+async def test_ai_connection(db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Ping the configured AI provider to verify the API key works."""
     from services.ai_service import generate_reply, get_ai_settings as _get
-    stored = _get(db)
+    stored = _get(db, user_id)
 
     if not stored["api_key"]:
         raise HTTPException(status_code=400, detail="No API key configured")

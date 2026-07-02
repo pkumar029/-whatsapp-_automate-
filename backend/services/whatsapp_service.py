@@ -4,13 +4,14 @@ Selected Package: pywa (Python WhatsApp library)
 Docs: https://pywa.readthedocs.io
 """
 import logging
+import re
 import qrcode
 import io
 import base64
 from datetime import datetime
 from typing import Optional
 from sqlalchemy.orm import Session
-from models.models import WhatsappSession, SessionStatus
+from models.models import WhatsappSession, SessionStatus, Contact
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,68 @@ logger = logging.getLogger(__name__)
 # Global WhatsApp client instance
 _wa_client = None
 _session_id: Optional[int] = None
+
+WHATSAPP_MAX_MESSAGE_LENGTH = 4096
+_PHONE_RE = re.compile(r'^\+?[0-9]{7,15}$')
+
+
+class WhatsAppSendError(ValueError):
+    """Raised when a message can't be sent. `retryable` tells callers (e.g. the
+    automation runner) whether trying again might succeed — connection/recipient/
+    message problems won't fix themselves, but a bridge hiccup might."""
+    def __init__(self, message: str, retryable: bool = False):
+        super().__init__(message)
+        self.retryable = retryable
+
+
+class NotConnectedError(WhatsAppSendError):
+    def __init__(self):
+        super().__init__(
+            "❌ WhatsApp is not connected.\nPlease reconnect your WhatsApp account.",
+            retryable=False,
+        )
+
+
+class InvalidRecipientError(WhatsAppSendError):
+    def __init__(self, reason: str = "❌ Invalid WhatsApp number."):
+        super().__init__(reason, retryable=False)
+
+
+class MessageValidationError(WhatsAppSendError):
+    def __init__(self, reason: str):
+        super().__init__(reason, retryable=False)
+
+
+class ServiceUnavailableError(WhatsAppSendError):
+    def __init__(self, detail: str = ""):
+        msg = "❌ WhatsApp service unavailable."
+        if detail:
+            msg += f" ({detail})"
+        super().__init__(msg, retryable=True)
+
+
+def _validate_phone(phone: str) -> None:
+    if not phone:
+        raise InvalidRecipientError()
+    if phone.endswith("@g.us"):
+        return  # WhatsApp group JID
+    if not _PHONE_RE.match(phone.strip()):
+        raise InvalidRecipientError()
+
+
+def _validate_message(message: str) -> None:
+    if not message or not message.strip():
+        raise MessageValidationError("❌ Message is empty.")
+    if len(message) > WHATSAPP_MAX_MESSAGE_LENGTH:
+        raise MessageValidationError(
+            f"❌ Message exceeds the {WHATSAPP_MAX_MESSAGE_LENGTH}-character "
+            f"WhatsApp limit ({len(message)} characters)."
+        )
+    unresolved = re.findall(r'\{\{[a-zA-Z0-9_]+\}\}', message)
+    if unresolved:
+        raise MessageValidationError(
+            f"❌ Message has unresolved variables: {', '.join(sorted(set(unresolved)))}"
+        )
 
 
 def _generate_qr_base64(data: str) -> str:
@@ -32,20 +95,22 @@ def _generate_qr_base64(data: str) -> str:
     return base64.b64encode(buf.getvalue()).decode('utf-8')
 
 
-def get_or_create_session(db: Session) -> WhatsappSession:
-    """Get the latest session or create a new one."""
-    session = db.query(WhatsappSession).order_by(WhatsappSession.id.desc()).first()
+def get_or_create_session(db: Session, user_id: int) -> WhatsappSession:
+    """Get this user's session or create a new one. Each user has exactly one
+    WhatsappSession row — their own connection state, independent of every
+    other user's."""
+    session = db.query(WhatsappSession).filter(WhatsappSession.user_id == user_id).order_by(WhatsappSession.id.desc()).first()
     if not session:
-        session = WhatsappSession(status=SessionStatus.disconnected)
+        session = WhatsappSession(user_id=user_id, status=SessionStatus.disconnected)
         db.add(session)
         db.commit()
         db.refresh(session)
     return session
 
 
-def get_session_status(db: Session) -> dict:
+def get_session_status(db: Session, user_id: int) -> dict:
     """Get the current WhatsApp session status from database."""
-    session = get_or_create_session(db)
+    session = get_or_create_session(db, user_id)
     connection_type = session.session_data.get("connection_type") if session.session_data else None
     pairing_code = None
     
@@ -71,7 +136,7 @@ def get_session_status(db: Session) -> dict:
                     # Adopt any ownerless contacts into this account (one-time migration)
                     if session.phone:
                         from services.contacts_service import claim_orphan_contacts
-                        claim_orphan_contacts(db, session.phone)
+                        claim_orphan_contacts(db, session.phone, user_id)
                 elif bridge_status == "connecting":
                     session.qr_code = bridge_data.get("qr")
                     if bridge_error:
@@ -98,10 +163,10 @@ def get_session_status(db: Session) -> dict:
     }
 
 
-def connect_whatsapp(db: Session) -> dict:
+def connect_whatsapp(db: Session, user_id: int) -> dict:
     """Fallback legacy connection call."""
     logger.info("Initiating legacy WhatsApp connection...")
-    session = get_or_create_session(db)
+    session = get_or_create_session(db, user_id)
     session.status = SessionStatus.connecting
     db.commit()
     qr_data = f"wa-connect:{datetime.utcnow().timestamp()}"
@@ -116,10 +181,10 @@ def connect_whatsapp(db: Session) -> dict:
     }
 
 
-def connect_whatsapp_with_config(db: Session, config: "WhatsAppConnectRequest") -> dict:
+def connect_whatsapp_with_config(db: Session, config: "WhatsAppConnectRequest", user_id: int) -> dict:
     """Initiate connection depending on connection type."""
     logger.info(f"Connecting WhatsApp with type: {config.connection_type}")
-    session = get_or_create_session(db)
+    session = get_or_create_session(db, user_id)
     
     session.error_message = None
     session.qr_code = None
@@ -200,7 +265,7 @@ def connect_whatsapp_with_config(db: Session, config: "WhatsAppConnectRequest") 
                     db.commit()
                     if session.phone:
                         from services.contacts_service import claim_orphan_contacts
-                        claim_orphan_contacts(db, session.phone)
+                        claim_orphan_contacts(db, session.phone, user_id)
                     return {
                         "status": "connected",
                         "message": "WhatsApp connected successfully.",
@@ -238,10 +303,10 @@ def connect_whatsapp_with_config(db: Session, config: "WhatsAppConnectRequest") 
         raise ValueError(f"Unknown connection type: {config.connection_type}")
 
 
-def disconnect_whatsapp(db: Session) -> dict:
+def disconnect_whatsapp(db: Session, user_id: int) -> dict:
     """Disconnect the WhatsApp session."""
     logger.info("Disconnecting WhatsApp session...")
-    session = get_or_create_session(db)
+    session = get_or_create_session(db, user_id)
     connection_type = session.session_data.get("connection_type") if session.session_data else None
     
     try:
@@ -287,13 +352,25 @@ def clear_bridge_session() -> dict:
         return {"success": False, "message": str(e)}
 
 
-def send_whatsapp_message(db: Session, phone: str, message: str) -> dict:
-    """Send a WhatsApp message based on connection type."""
+def send_whatsapp_message(db: Session, phone: str, message: str, user_id: int, contact: Optional[Contact] = None) -> dict:
+    """Send a WhatsApp message based on connection type.
+
+    Validates the message, recipient, and connection state up front so callers
+    (automation runner, manual send, campaigns) get a specific, actionable
+    error — never a silent failure. Raises WhatsAppSendError (or a subclass);
+    check `.retryable` to decide whether a retry is worth attempting.
+    """
     logger.info(f"Sending WhatsApp message to {phone}")
-    session = get_or_create_session(db)
+
+    _validate_message(message)
+    _validate_phone(phone)
+    if contact is not None and getattr(contact, "is_blocked", False):
+        raise InvalidRecipientError("❌ Contact is blocked.")
+
+    session = get_or_create_session(db, user_id)
     if session.status != SessionStatus.connected:
-        raise ValueError("WhatsApp is not connected. Please connect first.")
-        
+        raise NotConnectedError()
+
     connection_type = session.session_data.get("connection_type") if session.session_data else "dev"
     
     try:
@@ -341,12 +418,17 @@ def send_whatsapp_message(db: Session, phone: str, message: str) -> dict:
                     "body": message
                 }
             }
-            r = httpx.post(url, headers=headers, json=payload, timeout=10.0)
+            try:
+                r = httpx.post(url, headers=headers, json=payload, timeout=10.0)
+            except (httpx.ConnectError, httpx.TimeoutException) as e:
+                raise ServiceUnavailableError(f"Meta API unreachable: {e}")
             if r.status_code != 200:
                 res_data = r.json()
                 error_msg = res_data.get("error", {}).get("message", "Unknown Meta API error")
-                raise Exception(f"Meta API error: {error_msg}")
-                
+                # 5xx is Meta's side hiccuping — worth a retry; 4xx means the
+                # request itself (bad number, bad payload) was rejected.
+                raise WhatsAppSendError(f"❌ WhatsApp rejected the message: {error_msg}", retryable=r.status_code >= 500)
+
             res_data = r.json()
             message_id = res_data.get("messages", [{}])[0].get("id", f"meta_{datetime.utcnow().timestamp()}")
             return {
@@ -362,12 +444,20 @@ def send_whatsapp_message(db: Session, phone: str, message: str) -> dict:
                 "phone": phone,
                 "message": message
             }
-            r = httpx.post("http://localhost:7002/send", json=payload, timeout=15.0)
+            try:
+                r = httpx.post("http://localhost:7002/send", json=payload, timeout=15.0)
+            except (httpx.ConnectError, httpx.TimeoutException) as e:
+                raise ServiceUnavailableError(f"bridge unreachable on port 7002: {e}")
             if r.status_code != 200:
-                res_data = r.json()
-                error_msg = res_data.get("error", "Unknown bridge error")
-                raise Exception(f"Bridge error: {error_msg}")
-                
+                try:
+                    res_data = r.json()
+                    error_msg = res_data.get("error", "Unknown bridge error")
+                except Exception:
+                    error_msg = r.text[:200] or "Unknown bridge error"
+                # 5xx is the bridge itself hiccuping — worth a retry; 4xx means
+                # the number/message was rejected and won't succeed on retry.
+                raise WhatsAppSendError(f"❌ WhatsApp rejected the message: {error_msg}", retryable=r.status_code >= 500)
+
             res_data = r.json()
             return {
                 "success": True,
@@ -382,9 +472,9 @@ def send_whatsapp_message(db: Session, phone: str, message: str) -> dict:
         raise
 
 
-def simulate_connected(db: Session, phone: str = "+91 9876543210") -> dict:
+def simulate_connected(db: Session, user_id: int, phone: str = "+91 9876543210") -> dict:
     """Development helper: Mark session as connected."""
-    session = get_or_create_session(db)
+    session = get_or_create_session(db, user_id)
     session.status = SessionStatus.connected
     session.phone = phone
     session.connected_at = datetime.utcnow()
@@ -396,9 +486,9 @@ def simulate_connected(db: Session, phone: str = "+91 9876543210") -> dict:
     return {"status": "connected", "phone": phone, "session_id": session.id}
 
 
-def refresh_session_if_needed(db: Session) -> bool:
+def refresh_session_if_needed(db: Session, user_id: int) -> bool:
     """Check if session needs refresh."""
-    session = get_or_create_session(db)
+    session = get_or_create_session(db, user_id)
     if session.status == SessionStatus.expired:
         logger.warning(f"Session {session.id} expired — attempting refresh")
         return False

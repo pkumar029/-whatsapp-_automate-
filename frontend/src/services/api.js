@@ -26,24 +26,14 @@ api.interceptors.request.use(
 )
 
 // ─── Response Interceptor ────────────────────────────────────
-let _refreshing = false
+// A 401 means the token is missing/expired/invalid — clear it and let
+// AuthContext (listening for this event) drop the user back to /auth.
 api.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    if (error.response?.status === 401 && !error.config?._retry && !_refreshing) {
-      error.config._retry = true
-      _refreshing = true
-      try {
-        const res = await api.get('/auth/auto-token')
-        const token = res.data.access_token
-        localStorage.setItem('wa_token', token)
-        error.config.headers.Authorization = `Bearer ${token}`
-        return api(error.config)
-      } catch (_) {
-        localStorage.removeItem('wa_token')
-      } finally {
-        _refreshing = false
-      }
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('wa_token')
+      window.dispatchEvent(new Event('auth:unauthorized'))
     }
     return Promise.reject(error)
   }
@@ -164,7 +154,6 @@ export const statusApi = {
 
 // ─── Auth API ─────────────────────────────────────────────────
 export const authApi = {
-  autoToken: () => api.get('/auth/auto-token'),
   login: (data) => api.post('/auth/login', data),
   register: (data) => api.post('/auth/register', data),
   logout: () => api.post('/auth/logout'),

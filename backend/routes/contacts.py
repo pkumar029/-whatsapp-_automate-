@@ -11,6 +11,7 @@ from database.connection import get_db
 from services import contacts_service
 from models.schemas import ContactCreate, ContactUpdate, ContactResponse, ContactListResponse
 from models.models import Contact
+from dependencies import current_user_id
 
 router = APIRouter(prefix="/contacts", tags=["Contacts"])
 
@@ -23,68 +24,76 @@ async def list_contacts(
     is_active: Optional[bool] = Query(None),
     wa_account: Optional[str] = Query(None),
     saved_only: bool = Query(False, description="When true, return only address-book contacts"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user_id: int = Depends(current_user_id),
 ):
     """List contacts with pagination and optional search."""
     if not wa_account:
         from models.models import WhatsappSession, SessionStatus
-        session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
+        session = db.query(WhatsappSession).filter(
+            WhatsappSession.user_id == user_id, WhatsappSession.status == SessionStatus.connected
+        ).first()
         if session:
             wa_account = session.phone
 
     return contacts_service.get_contacts(
-        db, page=page, limit=limit, search=search,
+        db, user_id, page=page, limit=limit, search=search,
         is_active=is_active, wa_account=wa_account, saved_only=saved_only
     )
 
 
 @router.post("", response_model=ContactResponse, status_code=201)
-async def create_contact(data: ContactCreate, db: Session = Depends(get_db)):
+async def create_contact(data: ContactCreate, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Create a new contact."""
     try:
-        return contacts_service.create_contact(db, data)
+        return contacts_service.create_contact(db, data, user_id)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.get("/search")
-async def search_contacts(q: str = Query(..., min_length=1), db: Session = Depends(get_db)):
+async def search_contacts(q: str = Query(..., min_length=1), db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Search contacts by name, phone, or email."""
     from models.models import WhatsappSession, SessionStatus
-    session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
+    session = db.query(WhatsappSession).filter(
+        WhatsappSession.user_id == user_id, WhatsappSession.status == SessionStatus.connected
+    ).first()
     wa_account = session.phone if session else None
-    result = contacts_service.get_contacts(db, search=q, limit=10, wa_account=wa_account)
+    result = contacts_service.get_contacts(db, user_id, search=q, limit=10, wa_account=wa_account)
     return result["contacts"]
 
 
 @router.post("/sync")
-async def sync_contacts(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def sync_contacts(background_tasks: BackgroundTasks, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Start a background contact sync and return immediately.
-    Poll GET /contacts/sync-progress for live progress."""
+    Poll GET /contacts/sync-progress?user_id=<id> for live progress."""
     from database.connection import SessionLocal
 
     def _run_sync():
         bg_db = SessionLocal()
         try:
-            contacts_service.sync_whatsapp_contacts(bg_db)
+            contacts_service.sync_whatsapp_contacts(bg_db, user_id)
         except Exception:
             pass
         finally:
             bg_db.close()
 
     background_tasks.add_task(_run_sync)
-    return {"success": True, "message": "Sync started — poll /contacts/sync-progress for updates."}
+    return {"success": True, "message": "Sync started — poll /contacts/sync-progress for updates.", "user_id": user_id}
 
 
 @router.get("/sync-progress")
-async def sync_progress(request: Request):
-    """SSE endpoint — streams contact sync progress in real time."""
+async def sync_progress(request: Request, user_id: int = Query(...)):
+    """SSE endpoint — streams contact sync progress in real time.
+    Public (EventSource can't send auth headers), so the caller passes
+    user_id explicitly as a query param — this only exposes sync progress
+    percentages, never contact data, so a wrong/spoofed id is low-risk."""
 
     async def generator():
         while True:
             if await request.is_disconnected():
                 return
-            state = contacts_service.get_sync_progress()
+            state = contacts_service.get_sync_progress(user_id)
             yield f"data: {json.dumps(state)}\n\n"
             if state.get("status") in ("complete", "error"):
                 return
@@ -98,14 +107,16 @@ async def sync_progress(request: Request):
 
 
 @router.get("/export")
-async def export_contacts(db: Session = Depends(get_db)):
+async def export_contacts(db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Export contacts for the active WhatsApp account as a CSV file."""
     import csv, io
     from models.models import WhatsappSession, SessionStatus
-    session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
+    session = db.query(WhatsappSession).filter(
+        WhatsappSession.user_id == user_id, WhatsappSession.status == SessionStatus.connected
+    ).first()
     wa_account = session.phone if session else None
 
-    query = db.query(Contact).filter(Contact.is_active == True, Contact.is_valid == True)
+    query = db.query(Contact).filter(Contact.user_id == user_id, Contact.is_active == True, Contact.is_valid == True)
     if wa_account:
         query = query.filter(Contact.wa_account == wa_account)
     contacts = query.order_by(Contact.name).all()
@@ -125,13 +136,15 @@ async def export_contacts(db: Session = Depends(get_db)):
 
 
 @router.post("/import")
-async def import_contacts(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def import_contacts(file: UploadFile = File(...), db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Import contacts from a CSV file (columns: name, phone, email, notes, tags).
     Contacts are assigned to the currently connected WhatsApp account so they
     appear immediately in the contacts list."""
     import csv, io
     from models.models import WhatsappSession, SessionStatus
-    session = db.query(WhatsappSession).filter(WhatsappSession.status == SessionStatus.connected).first()
+    session = db.query(WhatsappSession).filter(
+        WhatsappSession.user_id == user_id, WhatsappSession.status == SessionStatus.connected
+    ).first()
     wa_account = session.phone if session else None
 
     content = await file.read()
@@ -153,7 +166,7 @@ async def import_contacts(file: UploadFile = File(...), db: Session = Depends(ge
             skipped += 1
             continue
         try:
-            existing = db.query(Contact).filter(Contact.phone == phone).first()
+            existing = db.query(Contact).filter(Contact.phone == phone, Contact.user_id == user_id).first()
             if existing:
                 existing.name = name
                 if email: existing.email = email
@@ -163,7 +176,7 @@ async def import_contacts(file: UploadFile = File(...), db: Session = Depends(ge
                 db.commit()
                 updated += 1
             else:
-                c = Contact(name=name, phone=phone, email=email, notes=notes,
+                c = Contact(user_id=user_id, name=name, phone=phone, email=email, notes=notes,
                             tags=tags, wa_account=wa_account)
                 db.add(c)
                 db.commit()
@@ -263,36 +276,36 @@ def status_post(data: dict):
 
 
 @router.get("/{contact_id}", response_model=ContactResponse)
-async def get_contact(contact_id: int, db: Session = Depends(get_db)):
+async def get_contact(contact_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Get a single contact by ID."""
-    contact = contacts_service.get_contact_by_id(db, contact_id)
+    contact = contacts_service.get_contact_by_id(db, contact_id, user_id)
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
     return contact
 
 
 @router.put("/{contact_id}", response_model=ContactResponse)
-async def update_contact(contact_id: int, data: ContactUpdate, db: Session = Depends(get_db)):
+async def update_contact(contact_id: int, data: ContactUpdate, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Update a contact."""
-    contact = contacts_service.update_contact(db, contact_id, data)
+    contact = contacts_service.update_contact(db, contact_id, data, user_id)
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
     return contact
 
 
 @router.delete("/{contact_id}")
-async def delete_contact(contact_id: int, db: Session = Depends(get_db)):
+async def delete_contact(contact_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Delete a contact."""
-    deleted = contacts_service.delete_contact(db, contact_id)
+    deleted = contacts_service.delete_contact(db, contact_id, user_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Contact not found")
     return {"success": True, "message": "Contact deleted"}
 
 
 @router.get("/{contact_id}/group-members")
-def get_group_members(contact_id: int, db: Session = Depends(get_db)):
+def get_group_members(contact_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Get group participants from WhatsApp bridge for a group contact."""
-    contact = contacts_service.get_contact_by_id(db, contact_id)
+    contact = contacts_service.get_contact_by_id(db, contact_id, user_id)
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
     from config.settings import settings
@@ -309,10 +322,10 @@ def get_group_members(contact_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{contact_id}/profile-pic")
-def get_profile_pic(contact_id: int, db: Session = Depends(get_db)):
+def get_profile_pic(contact_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Return contact profile picture URL, using cached DB value when available."""
     from config.settings import settings
-    contact = contacts_service.get_contact_by_id(db, contact_id)
+    contact = contacts_service.get_contact_by_id(db, contact_id, user_id)
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
 

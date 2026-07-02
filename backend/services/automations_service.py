@@ -12,8 +12,8 @@ from models.schemas import AutomationCreate, AutomationUpdate, StepSchema
 logger = logging.getLogger(__name__)
 
 
-def get_automations(db: Session, page: int = 1, limit: int = 20, search: Optional[str] = None, wa_account: Optional[str] = None) -> dict:
-    query = db.query(Automation)
+def get_automations(db: Session, user_id: int, page: int = 1, limit: int = 20, search: Optional[str] = None, wa_account: Optional[str] = None) -> dict:
+    query = db.query(Automation).filter(Automation.user_id == user_id)
     if wa_account:
         query = query.filter(
             (Automation.wa_account == wa_account) | Automation.wa_account.is_(None)
@@ -44,12 +44,13 @@ def get_automations(db: Session, page: int = 1, limit: int = 20, search: Optiona
     return {"automations": result, "total": total}
 
 
-def get_automation_by_id(db: Session, automation_id: int) -> Optional[Automation]:
-    return db.query(Automation).filter(Automation.id == automation_id).first()
+def get_automation_by_id(db: Session, automation_id: int, user_id: int) -> Optional[Automation]:
+    return db.query(Automation).filter(Automation.id == automation_id, Automation.user_id == user_id).first()
 
 
-def create_automation(db: Session, data: AutomationCreate, wa_account: Optional[str] = None) -> Automation:
+def create_automation(db: Session, data: AutomationCreate, user_id: int, wa_account: Optional[str] = None) -> Automation:
     automation = Automation(
+        user_id=user_id,
         name=data.name,
         wa_account=wa_account,
         description=data.description,
@@ -77,8 +78,8 @@ def create_automation(db: Session, data: AutomationCreate, wa_account: Optional[
     return automation
 
 
-def update_automation(db: Session, automation_id: int, data: AutomationUpdate) -> Optional[Automation]:
-    automation = get_automation_by_id(db, automation_id)
+def update_automation(db: Session, automation_id: int, data: AutomationUpdate, user_id: int) -> Optional[Automation]:
+    automation = get_automation_by_id(db, automation_id, user_id)
     if not automation:
         return None
 
@@ -109,8 +110,8 @@ def update_automation(db: Session, automation_id: int, data: AutomationUpdate) -
     return automation
 
 
-def delete_automation(db: Session, automation_id: int) -> bool:
-    automation = get_automation_by_id(db, automation_id)
+def delete_automation(db: Session, automation_id: int, user_id: int) -> bool:
+    automation = get_automation_by_id(db, automation_id, user_id)
     if not automation:
         return False
     db.delete(automation)
@@ -118,8 +119,8 @@ def delete_automation(db: Session, automation_id: int) -> bool:
     return True
 
 
-def activate_automation(db: Session, automation_id: int) -> Optional[Automation]:
-    automation = get_automation_by_id(db, automation_id)
+def activate_automation(db: Session, automation_id: int, user_id: int) -> Optional[Automation]:
+    automation = get_automation_by_id(db, automation_id, user_id)
     if not automation:
         return None
     automation.is_active = True
@@ -128,8 +129,8 @@ def activate_automation(db: Session, automation_id: int) -> Optional[Automation]
     return automation
 
 
-def deactivate_automation(db: Session, automation_id: int) -> Optional[Automation]:
-    automation = get_automation_by_id(db, automation_id)
+def deactivate_automation(db: Session, automation_id: int, user_id: int) -> Optional[Automation]:
+    automation = get_automation_by_id(db, automation_id, user_id)
     if not automation:
         return None
     automation.is_active = False
@@ -138,15 +139,15 @@ def deactivate_automation(db: Session, automation_id: int) -> Optional[Automatio
     return automation
 
 
-def get_active_automations_count(db: Session, wa_account: Optional[str] = None) -> int:
-    q = db.query(func.count(Automation.id)).filter(Automation.is_active == True)
+def get_active_automations_count(db: Session, user_id: int, wa_account: Optional[str] = None) -> int:
+    q = db.query(func.count(Automation.id)).filter(Automation.user_id == user_id, Automation.is_active == True)
     if wa_account:
         q = q.filter((Automation.wa_account == wa_account) | Automation.wa_account.is_(None))
     return q.scalar() or 0
 
 
-def add_step(db: Session, automation_id: int, data: StepSchema) -> Optional[AutomationStep]:
-    automation = get_automation_by_id(db, automation_id)
+def add_step(db: Session, automation_id: int, data: StepSchema, user_id: int) -> Optional[AutomationStep]:
+    automation = get_automation_by_id(db, automation_id, user_id)
     if not automation:
         return None
     # Assign next order if not specified
@@ -168,7 +169,10 @@ def add_step(db: Session, automation_id: int, data: StepSchema) -> Optional[Auto
     return step
 
 
-def update_step(db: Session, automation_id: int, step_id: int, data: StepSchema) -> Optional[AutomationStep]:
+def update_step(db: Session, automation_id: int, step_id: int, data: StepSchema, user_id: int) -> Optional[AutomationStep]:
+    automation = get_automation_by_id(db, automation_id, user_id)
+    if not automation:
+        return None
     step = db.query(AutomationStep).filter(
         AutomationStep.id == step_id,
         AutomationStep.automation_id == automation_id
@@ -190,7 +194,10 @@ def update_step(db: Session, automation_id: int, step_id: int, data: StepSchema)
     return step
 
 
-def delete_step(db: Session, automation_id: int, step_id: int) -> bool:
+def delete_step(db: Session, automation_id: int, step_id: int, user_id: int) -> bool:
+    automation = get_automation_by_id(db, automation_id, user_id)
+    if not automation:
+        return False
     step = db.query(AutomationStep).filter(
         AutomationStep.id == step_id,
         AutomationStep.automation_id == automation_id

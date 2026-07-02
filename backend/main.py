@@ -114,6 +114,47 @@ async def lifespan(app: FastAPI):
          "ALTER TABLE contacts DROP INDEX phone"),
         ("contacts composite phone+wa_account unique",
          "ALTER TABLE contacts ADD UNIQUE KEY uq_contact_phone_account (phone, wa_account)"),
+        # ─── Multi-tenant isolation (Phase 0) ───────────────────
+        ("contacts user_id column",
+         "ALTER TABLE contacts ADD COLUMN user_id INT UNSIGNED NULL"),
+        ("contacts user_id index",
+         "ALTER TABLE contacts ADD INDEX idx_contact_user (user_id)"),
+        ("messages user_id column",
+         "ALTER TABLE messages ADD COLUMN user_id INT UNSIGNED NULL"),
+        ("messages user_id index",
+         "ALTER TABLE messages ADD INDEX idx_message_user (user_id)"),
+        ("automations user_id column",
+         "ALTER TABLE automations ADD COLUMN user_id INT UNSIGNED NULL"),
+        ("automations user_id index",
+         "ALTER TABLE automations ADD INDEX idx_automation_user (user_id)"),
+        ("campaigns user_id column",
+         "ALTER TABLE campaigns ADD COLUMN user_id INT UNSIGNED NULL"),
+        ("campaigns user_id index",
+         "ALTER TABLE campaigns ADD INDEX idx_campaigns_user (user_id)"),
+        ("whatsapp_profiles user_id column",
+         "ALTER TABLE whatsapp_profiles ADD COLUMN user_id INT UNSIGNED NULL"),
+        ("whatsapp_profiles user_id index",
+         "ALTER TABLE whatsapp_profiles ADD INDEX idx_profile_user (user_id)"),
+        ("messages retry_count column",
+         "ALTER TABLE messages ADD COLUMN retry_count INT NOT NULL DEFAULT 0"),
+        ("messages status enum expand",
+         "ALTER TABLE messages MODIFY COLUMN status "
+         "ENUM('pending','sending','sent','delivered','read','failed') "
+         "DEFAULT 'pending'"),
+        ("user_ai_settings table",
+         "CREATE TABLE IF NOT EXISTS user_ai_settings ("
+         "  id INT AUTO_INCREMENT PRIMARY KEY,"
+         "  user_id INT UNSIGNED NOT NULL UNIQUE,"
+         "  provider VARCHAR(50) NULL,"
+         "  api_key TEXT NULL,"
+         "  tone VARCHAR(50) NULL,"
+         "  language VARCHAR(20) NULL,"
+         "  model VARCHAR(100) NULL,"
+         "  enabled TINYINT(1) NOT NULL DEFAULT 0,"
+         "  auto_suggest TINYINT(1) NOT NULL DEFAULT 0,"
+         "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+         "  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+         ")"),
     ]
     import asyncio
     def _run_migrations():
@@ -138,6 +179,37 @@ async def lifespan(app: FastAPI):
         ensure_admin_user(_seed_db)
     finally:
         _seed_db.close()
+
+    # Backfill pre-existing rows (created before user_id columns existed) onto
+    # the first user, so nothing becomes orphaned/invisible once Phase 2 adds
+    # user_id filtering to every query. New rows are always created with a
+    # real user_id from here on, so this only ever touches legacy data.
+    _backfill = [
+        ("whatsapp_sessions user_id backfill",
+         "UPDATE whatsapp_sessions SET user_id = (SELECT id FROM users ORDER BY id ASC LIMIT 1) WHERE user_id IS NULL"),
+        ("contacts user_id backfill",
+         "UPDATE contacts SET user_id = (SELECT id FROM users ORDER BY id ASC LIMIT 1) WHERE user_id IS NULL"),
+        ("messages user_id backfill",
+         "UPDATE messages SET user_id = (SELECT id FROM users ORDER BY id ASC LIMIT 1) WHERE user_id IS NULL"),
+        ("automations user_id backfill",
+         "UPDATE automations SET user_id = (SELECT id FROM users ORDER BY id ASC LIMIT 1) WHERE user_id IS NULL"),
+        ("campaigns user_id backfill",
+         "UPDATE campaigns SET user_id = (SELECT id FROM users ORDER BY id ASC LIMIT 1) WHERE user_id IS NULL"),
+        ("whatsapp_profiles user_id backfill",
+         "UPDATE whatsapp_profiles SET user_id = (SELECT id FROM users ORDER BY id ASC LIMIT 1) WHERE user_id IS NULL"),
+    ]
+
+    def _run_backfill():
+        for _name, _sql_str in _backfill:
+            try:
+                with engine.connect() as _conn:
+                    _conn.execute(_sql(_sql_str))
+                    _conn.commit()
+                logger.info(f"✅ Backfill OK: {_name}")
+            except Exception as _e:
+                logger.warning(f"Backfill note ({_name}): {_e}")
+
+    await asyncio.get_event_loop().run_in_executor(None, _run_backfill)
 
     from services.queue_service import run_queue_worker_loop
     worker_task = asyncio.create_task(run_queue_worker_loop())
