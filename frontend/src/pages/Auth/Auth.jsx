@@ -1,11 +1,17 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import './Auth.css'
 
 export default function Auth() {
   const navigate = useNavigate()
-  const { login, register } = useAuth()
+  const { login, register, isAuthenticated } = useAuth()
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/dashboard', { replace: true })
+    }
+  }, [isAuthenticated, navigate])
   const [tab, setTab] = useState('login') // 'login' | 'register'
   const [name, setName] = useState('')
   const [username, setUsername] = useState('')

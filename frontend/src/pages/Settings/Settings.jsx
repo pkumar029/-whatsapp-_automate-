@@ -1229,20 +1229,7 @@ export default function Settings() {
         ))}
       </div>
 
-      {/* Log out */}
-      <div style={{ borderTop: `1px solid ${WA.border}`, padding: '8px 0' }}>
-        <div
-          onClick={handleLogout}
-          style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '13px 20px', cursor: 'pointer' }}
-          onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,77,79,.08)'}
-          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-        >
-          <div style={{ width: 38, height: 38, borderRadius: '50%', background: 'rgba(255,77,79,.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <LogOut size={18} color={WA.red} />
-          </div>
-          <span style={{ fontSize: 15, color: WA.red }}>Log out</span>
-        </div>
-      </div>
+
     </div>
   )
 

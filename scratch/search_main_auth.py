@@ -1,10 +1,10 @@
-path = "C:/Users/ELCOT/Desktop/project/whatsapp-automate/backend/main.py"
+path = "C:/Users/ELCOT/Desktop/project/whatsapp-automate/backend/routes/auth.py"
 try:
     with open(path, "r", encoding="utf-8") as f:
-        content = f.read()
-    if "middleware" in content or "auth" in content:
-        print(content)
-    else:
-        print("No middleware or auth references in main.py")
+        lines = f.readlines()
+    for idx, l in enumerate(lines):
+        if "token" in l.lower() or "auto" in l.lower():
+            clean_line = l.strip().encode('ascii', 'ignore').decode('ascii')
+            print(f"{idx+1}: {clean_line}")
 except Exception as e:
     print(f"Error: {e}")
