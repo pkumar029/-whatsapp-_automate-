@@ -221,7 +221,7 @@ export function AppProvider({ children }) {
       if (es) { try { es.close() } catch {} }
       clearTimeout(reconnectTimer)
     }
-  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isAuthenticated])  // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <AppContext.Provider value={{

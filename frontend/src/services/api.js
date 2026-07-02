@@ -61,7 +61,9 @@ export const contactsApi = {
   delete: (id) => api.delete(`/contacts/${id}`),
   search: (query) => api.get('/contacts/search', { params: { q: query } }),
   sync: () => api.post('/contacts/sync'),
-  syncProgressUrl: () => `${BASE_URL}/contacts/sync-progress`,
+  // Public SSE endpoint (EventSource can't send auth headers) — backend
+  // requires user_id as a query param instead.
+  syncProgressUrl: (userId) => `${BASE_URL}/contacts/sync-progress?user_id=${userId}`,
   getChats: () => api.get('/contacts/chats'),
   getGroupMembers: (id) => api.get(`/contacts/${id}/group-members`),
   getProfilePic: (id) => api.get(`/contacts/${id}/profile-pic`),
@@ -80,6 +82,9 @@ export const messagesApi = {
   getByContact: (contactId, params) => api.get(`/messages/contact/${contactId}`, { params }),
   sync: () => api.post('/messages/sync'),
   checkGrammar: (data) => api.post('/messages/check-grammar', data),
+  // Public SSE endpoint (EventSource can't send auth headers) — backend
+  // requires user_id as a query param instead.
+  streamUrl: (userId) => `${BASE_URL}/messages/stream?user_id=${userId}`,
 }
 
 // ─── Automations API ─────────────────────────────────────────

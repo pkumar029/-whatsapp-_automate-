@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Users, MessageSquare, Zap, Wifi, WifiOff, TrendingUp, CheckCircle, XCircle, Clock, ArrowRight, Send, Download } from 'lucide-react'
-import { dashboardApi, BASE_URL } from '../../services/api'
+import { dashboardApi, messagesApi } from '../../services/api'
 import { Link } from 'react-router-dom'
 import { formatIST } from '../../utils/date'
 import { useApp } from '../../context/AppContext'
+import { useAuth } from '../../context/AuthContext'
 
 // ─── Stat Card Component ──────────────────────────────────────
 function StatCard({ title, value, icon: Icon, color, badge, badgeType }) {
@@ -410,6 +411,7 @@ function useElapsed(date) {
 // ─── Main Dashboard Page ──────────────────────────────────────
 export default function Dashboard() {
   const { profile, sessionStatus, waProfile } = useApp()
+  const { user } = useAuth()
   const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState(null)
@@ -439,14 +441,14 @@ export default function Dashboard() {
 
   // SSE: refresh immediately when a new inbound message arrives
   useEffect(() => {
-    if (sessionStatus.status !== 'connected') return
-    const es = new EventSource(`${BASE_URL}/messages/stream`)
+    if (sessionStatus.status !== 'connected' || !user) return
+    const es = new EventSource(messagesApi.streamUrl(user.id))
     es.onmessage = (e) => {
       try { if (JSON.parse(e.data).type === 'new_message') fetchData() } catch {}
     }
     es.onerror = () => {}
     return () => es.close()
-  }, [sessionStatus.status, fetchData])
+  }, [sessionStatus.status, fetchData, user])
 
   const displayStatus = sessionStatus || { status: 'disconnected' }
   const isConnected = displayStatus.status === 'connected'

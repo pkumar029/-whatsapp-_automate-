@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Users, Plus, Search, Edit2, Trash2, Phone, X, Check, RefreshCw, WifiOff, Megaphone, User, Download, Upload, BookUser } from 'lucide-react'
 import { contactsApi, whatsappApi } from '../../services/api'
 import { useApp } from '../../context/AppContext'
+import { useAuth } from '../../context/AuthContext'
 import { Link } from 'react-router-dom'
 import { formatISTDate } from '../../utils/date'
 import { getErrorMessage } from '../../utils/error'
@@ -108,6 +109,7 @@ export default function Contacts() {
 
   // Use AppContext session so this page reacts to connect/disconnect immediately
   const { sessionStatus, loadingSession } = useApp()
+  const { user } = useAuth()
 
   const fetchContacts = useCallback(async () => {
     setLoading(true)
@@ -176,7 +178,7 @@ export default function Contacts() {
       await contactsApi.sync()
 
       // Subscribe to SSE progress stream
-      const es = new EventSource(contactsApi.syncProgressUrl())
+      const es = new EventSource(contactsApi.syncProgressUrl(user.id))
       syncEsRef.current = es
 
       es.onmessage = (evt) => {

@@ -9,8 +9,9 @@ import {
   Timer, EyeOff, Link2, Download, Pin, Archive,
   Plus, Pencil, UserPlus, UserMinus, Crown, LogOut, Hash, Sparkles
 } from 'lucide-react'
-import { messagesApi, contactsApi, whatsappApi, groupsApi, aiApi, BASE_URL } from '../../services/api'
+import { messagesApi, contactsApi, whatsappApi, groupsApi, aiApi } from '../../services/api'
 import { useApp } from '../../context/AppContext'
+import { useAuth } from '../../context/AuthContext'
 import { Link } from 'react-router-dom'
 import { formatISTTime } from '../../utils/date'
 import { getErrorMessage } from '../../utils/error'
@@ -1056,6 +1057,7 @@ export default function Messages() {
 
   const isMobile = useIsMobile()
   const { sessionStatus, loadingSession, syncedAt } = useApp()
+  const { user } = useAuth()
   const [showAttachMenu, setShowAttachMenu] = useState(false)
   const [callModal, setCallModal] = useState(null)
   const [attachModal, setAttachModal] = useState(null)
@@ -1286,8 +1288,8 @@ export default function Messages() {
 
   // ── Real-time SSE: show incoming WhatsApp messages instantly ───
   useEffect(() => {
-    if (sessionStatus.status !== 'connected') return
-    const es = new EventSource(`${BASE_URL}/messages/stream`)
+    if (sessionStatus.status !== 'connected' || !user) return
+    const es = new EventSource(messagesApi.streamUrl(user.id))
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data)
@@ -1314,7 +1316,7 @@ export default function Messages() {
     }
     es.onerror = () => {}  // browser auto-reconnects on error
     return () => es.close()
-  }, [sessionStatus.status, selectedContact?.id, fetchMessages, notify])
+  }, [sessionStatus.status, selectedContact?.id, fetchMessages, notify, user])
 
   // ── Send message (with reply prefix) ──────────────────────────
   const handleSend = async (textToSend, mediaInfo = null, targetContact = null) => {
