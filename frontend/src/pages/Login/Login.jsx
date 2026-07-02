@@ -4,7 +4,7 @@ import {
   QrCode, RefreshCw, Key, HelpCircle, Lock,
   MessageSquare, Zap, Cpu, Cloud, Smartphone, ChevronLeft
 } from 'lucide-react'
-import { whatsappApi, healthApi } from '../../services/api'
+import { whatsappApi, healthApi, BASE_URL } from '../../services/api'
 import { useApp } from '../../context/AppContext'
 import { getErrorMessage } from '../../utils/error'
 
@@ -325,7 +325,7 @@ export default function Login() {
       {backendOk === false && (
         <div style={{ position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 999, background: 'rgba(255,77,79,0.15)', border: '1px solid rgba(255,77,79,0.5)', borderRadius: 10, padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: '#ff4d4f', backdropFilter: 'blur(8px)', whiteSpace: 'nowrap' }}>
           <span style={{ fontSize: 16 }}>⚠</span>
-          Backend server is not reachable — check that the service is running on port 7001
+          Backend server is not reachable — check that the service is running on port {BASE_URL.match(/:(\d+)/)?.[1] || '7005'}
         </div>
       )}
 
