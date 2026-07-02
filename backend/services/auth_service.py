@@ -39,22 +39,3 @@ def decode_token(token: str) -> dict:
         return jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
     except JWTError as e:
         raise ValueError(str(e))
-
-
-def ensure_admin_user(db) -> None:
-    """Create a default admin user on first run if the users table is empty."""
-    from models.models import User
-    try:
-        if db.query(User).count() == 0:
-            admin = User(
-                name="Admin",
-                email="admin@localhost",
-                password_hash=hash_password("admin123"),
-                is_admin=True,
-                is_active=True,
-            )
-            db.add(admin)
-            db.commit()
-            logger.info("Default admin user created → email: admin@localhost  password: admin123")
-    except Exception as e:
-        logger.warning(f"Could not seed admin user: {e}")

@@ -171,15 +171,6 @@ async def lifespan(app: FastAPI):
 
     await asyncio.get_event_loop().run_in_executor(None, _run_migrations)
 
-    # Seed default admin user if no users exist
-    from database.connection import SessionLocal as _SL
-    from services.auth_service import ensure_admin_user
-    _seed_db = _SL()
-    try:
-        ensure_admin_user(_seed_db)
-    finally:
-        _seed_db.close()
-
     # Backfill pre-existing rows (created before user_id columns existed) onto
     # the first user, so nothing becomes orphaned/invisible once Phase 2 adds
     # user_id filtering to every query. New rows are always created with a
