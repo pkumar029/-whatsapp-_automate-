@@ -4,6 +4,40 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
+
+// Backend webhook URL — configurable via env so it never silently drifts out
+// of sync with APP_PORT. Uses Node's built-in http module (not the global
+// fetch()) so forwarding never breaks on older Node versions where fetch
+// doesn't exist — that failure mode previously threw inside the try/catch
+// below with zero visibility, silently killing every message-based
+// automation trigger (keyword / pattern / any-message) while leaving
+// contact/tag triggers (a separate code path) unaffected.
+const BACKEND_WEBHOOK_URL = process.env.BACKEND_WEBHOOK_URL || 'http://localhost:7001/api/v1/whatsapp/webhook';
+
+function postWebhook(urlStr, payload) {
+    return new Promise((resolve, reject) => {
+        let url;
+        try { url = new URL(urlStr); } catch (e) { return reject(e); }
+        const body = JSON.stringify(payload);
+        const req = http.request({
+            hostname: url.hostname,
+            port: url.port,
+            path: url.pathname + url.search,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+            timeout: 10000,
+        }, (res) => {
+            let data = '';
+            res.on('data', chunk => { data += chunk; });
+            res.on('end', () => resolve({ statusCode: res.statusCode, body: data }));
+        });
+        req.on('error', reject);
+        req.on('timeout', () => req.destroy(new Error('Webhook request timed out after 10s')));
+        req.write(body);
+        req.end();
+    });
+}
 
 // LocalAuth with a clientId stores its profile under `<dataPath>/session-<clientId>`.
 function sessionDir(userId) {
@@ -341,13 +375,14 @@ async function initClient(session, phoneForPairingCode = null, linkMethod = 'qr'
             // userId identifies the owning app user directly — the backend no
             // longer needs to guess "the" connected session now that multiple
             // sessions can be connected at once.
-            await fetch('http://localhost:7001/api/v1/whatsapp/webhook', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId: session.userId, phone, content, name, tags, messageId })
-            });
+            const result = await postWebhook(BACKEND_WEBHOOK_URL, { userId: session.userId, phone, content, name, tags, messageId });
+            if (result.statusCode !== 200) {
+                console.error(`Webhook forward to ${BACKEND_WEBHOOK_URL} returned HTTP ${result.statusCode} for message from ${phone} (user ${session.userId}): ${result.body.slice(0, 300)}`);
+            } else {
+                console.log(`Webhook forwarded OK for message from ${phone} (user ${session.userId})`);
+            }
         } catch (err) {
-            console.error('Failed to forward inbound message to webhook:', err.message);
+            console.error(`Failed to forward inbound message to webhook (${BACKEND_WEBHOOK_URL}) for user ${session.userId}: ${err.message}`);
         }
     });
 

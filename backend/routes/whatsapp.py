@@ -285,6 +285,11 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
         ).filter(
             (Automation.wa_account == wa_account) | Automation.wa_account.is_(None)
         ).all()
+        logger.info(
+            f"Incoming Event — Message: {content!r}  From: {phone}  User: {owner_user_id}  "
+            f"wa_account: {wa_account}  Candidate automations: {len(active_automations)}"
+        )
+        matched_any = False
         for automation in active_automations:
             should_trigger = False
             trigger_reason = ""
@@ -335,15 +340,21 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
                         should_trigger = False
 
             if should_trigger:
-                logger.info(f"Triggering automation '{automation.name}' (ID: {automation.id}) via {trigger_reason}")
+                matched_any = True
+                logger.info(
+                    f"Trigger: {automation.trigger_type.value}  Message: {content!r}  Matched: YES  "
+                    f"Automation: '{automation.name}' (ID: {automation.id}) via {trigger_reason}"
+                )
 
                 # Background runner wrapper to use fresh DB session (avoids request lifecycle closing issues)
-                def bg_run(auto_id, trig_data):
+                def bg_run(auto_id, trig_data, auto_name=automation.name):
                     bg_db = SessionLocal()
                     try:
-                        run_automation(bg_db, auto_id, trig_data)
+                        log = run_automation(bg_db, auto_id, trig_data)
+                        status = log.status.value if log and log.status else "unknown"
+                        logger.info(f"Automation '{auto_name}' (ID: {auto_id}) completed — status: {status}")
                     except Exception as bg_err:
-                        logger.error(f"Background automation run failed: {bg_err}")
+                        logger.error(f"Background automation run failed for '{auto_name}' (ID: {auto_id}): {bg_err}")
                     finally:
                         bg_db.close()
 
@@ -354,6 +365,11 @@ async def whatsapp_webhook(payload: WebhookPayload, background_tasks: Background
                     "whatsapp_message_id": payload.messageId
                 }
                 background_tasks.add_task(bg_run, automation.id, trigger_data)
+            elif automation.trigger_type in (TriggerType.keyword, TriggerType.keyword_pattern, TriggerType.message_received):
+                logger.debug(f"Trigger: {automation.trigger_type.value}  Automation: '{automation.name}'  Message: {content!r}  Matched: NO")
+
+        if not matched_any:
+            logger.info(f"Incoming: {content!r} — No matching automation found (checked {len(active_automations)}).")
 
         return {"success": True, "message_id": msg.id}
     except Exception as e:

@@ -291,18 +291,32 @@ def execute_step(db: Session, step: AutomationStep, context: Dict[str, Any]) -> 
     elif step.step_type == StepType.react_message:
         message_id = context.get("whatsapp_message_id")
         emoji = config.get("emoji", "👍")
-        if message_id:
+        # Only a message-received/keyword/pattern trigger has a real message to
+        # react to — manual/scheduled/webhook runs have no whatsapp_message_id.
+        if not message_id:
+            raise StepExecutionError(
+                "❌ React to Message failed — no incoming message in this run's "
+                "context (only message-based triggers have one)."
+            )
+        try:
+            import httpx as _httpx
+            from services.whatsapp_service import bridge_url
+            r = _httpx.post(
+                bridge_url(context.get("user_id"), "/react"),
+                json={"messageId": message_id, "emoji": emoji},
+                timeout=5.0,
+            )
+        except Exception as e:
+            raise StepExecutionError(f"❌ React to Message failed — bridge unreachable: {e}")
+
+        if r.status_code != 200:
             try:
-                import httpx as _httpx
-                from services.whatsapp_service import bridge_url
-                _httpx.post(
-                    bridge_url(context.get("user_id"), "/react"),
-                    json={"messageId": message_id, "emoji": emoji},
-                    timeout=5.0,
-                )
-                logger.info(f"Reacted to message {message_id} with {emoji}")
-            except Exception as e:
-                logger.warning(f"React failed: {e}")
+                reason = r.json().get("error", r.text[:200])
+            except Exception:
+                reason = r.text[:200] or f"HTTP {r.status_code}"
+            raise StepExecutionError(f"❌ React to Message failed — {reason}")
+
+        logger.info(f"Reacted to message {message_id} with {emoji}")
         return context
 
     elif step.step_type == StepType.log:
