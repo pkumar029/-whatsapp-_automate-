@@ -29,7 +29,10 @@ class Settings(BaseSettings):
 
     # JWT — set JWT_SECRET in .env for production
     JWT_SECRET: str = "dev_secret_key"
-    JWT_EXPIRE_MINUTES: int = 1440  # 24 hours default
+    # There's no password to log back in with anymore (device-bound auth, see
+    # /auth/device) — the token IS the account, so it needs to last effectively
+    # forever rather than expire like a short login session.
+    JWT_EXPIRE_MINUTES: int = 525600  # 365 days default
 
     # WhatsApp
     WHATSAPP_PHONE_ID: Optional[str] = None

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   User, Mail, Building2, Briefcase, Camera, Save,
-  Lock, Eye, EyeOff, CheckCircle2, AlertCircle, Phone, Shield, MessageCircle, RefreshCw
+  CheckCircle2, AlertCircle, Phone, Shield, MessageCircle, RefreshCw
 } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 
@@ -71,7 +71,7 @@ function Toast({ msg, type }) {
 }
 
 export default function Profile() {
-  const { profile, updateProfile, changePassword, sessionStatus, waProfile, fetchWaProfile } = useApp()
+  const { profile, updateProfile, sessionStatus, waProfile, fetchWaProfile } = useApp()
   const navigate = useNavigate()
   const fileRef = useRef(null)
 
@@ -86,17 +86,6 @@ export default function Profile() {
   const [profileMsg, setProfileMsg] = useState('')
   const [profileErr, setProfileErr] = useState('')
   const [savingProfile, setSavingProfile] = useState(false)
-
-  // Password fields
-  const [oldPwd, setOldPwd] = useState('')
-  const [newPwd, setNewPwd] = useState('')
-  const [confirmPwd, setConfirmPwd] = useState('')
-  const [showOld, setShowOld] = useState(false)
-  const [showNew, setShowNew] = useState(false)
-  const [showConfirm, setShowConfirm] = useState(false)
-  const [pwdMsg, setPwdMsg] = useState('')
-  const [pwdErr, setPwdErr] = useState('')
-  const [savingPwd, setSavingPwd] = useState(false)
 
   const [refreshingWa, setRefreshingWa] = useState(false)
 
@@ -133,32 +122,6 @@ export default function Profile() {
     setProfileMsg('Profile saved successfully.')
     setTimeout(() => setProfileMsg(''), 3000)
   }
-
-  const handleSavePassword = async (e) => {
-    e.preventDefault()
-    if (!oldPwd || !newPwd || !confirmPwd) { setPwdErr('All fields are required.'); return }
-    if (newPwd !== confirmPwd) { setPwdErr('New passwords do not match.'); return }
-    if (newPwd.length < 6) { setPwdErr('Password must be at least 6 characters.'); return }
-    setSavingPwd(true)
-    setPwdMsg(''); setPwdErr('')
-    try {
-      await changePassword(oldPwd, newPwd)
-      setPwdMsg('Password changed successfully.')
-      setOldPwd(''); setNewPwd(''); setConfirmPwd('')
-      setTimeout(() => setPwdMsg(''), 3000)
-    } catch (err) {
-      setPwdErr(err.message || 'Failed to change password.')
-    } finally {
-      setSavingPwd(false)
-    }
-  }
-
-  const eyeBtn = (show, setShow) => (
-    <button type="button" onClick={() => setShow(v => !v)}
-      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 0 }}>
-      {show ? <EyeOff size={15} /> : <Eye size={15} />}
-    </button>
-  )
 
   return (
     <div style={{ maxWidth: 700, margin: '0 auto', paddingBottom: 40 }}>
@@ -382,53 +345,6 @@ export default function Profile() {
             Manage WhatsApp Connection →
           </button>
         </div>
-      </div>
-
-      {/* ── Change Password Card ── */}
-      <div className="card" style={{ padding: 24 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(99,102,241,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Lock size={18} color="#6366f1" />
-          </div>
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)' }}>Change Password</div>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Keep your account secure</div>
-          </div>
-        </div>
-
-        <form onSubmit={handleSavePassword} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <FormField label="Current Password" icon={Lock}>
-            <Input value={oldPwd} onChange={e => setOldPwd(e.target.value)}
-              placeholder="Enter current password"
-              type={showOld ? 'text' : 'password'}
-              rightEl={eyeBtn(showOld, setShowOld)} />
-          </FormField>
-          <div className="profile-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <FormField label="New Password" icon={Lock}>
-              <Input value={newPwd} onChange={e => setNewPwd(e.target.value)}
-                placeholder="Min. 6 characters"
-                type={showNew ? 'text' : 'password'}
-                rightEl={eyeBtn(showNew, setShowNew)} />
-            </FormField>
-            <FormField label="Confirm New Password" icon={Lock}>
-              <Input value={confirmPwd} onChange={e => setConfirmPwd(e.target.value)}
-                placeholder="Repeat new password"
-                type={showConfirm ? 'text' : 'password'}
-                rightEl={eyeBtn(showConfirm, setShowConfirm)} />
-            </FormField>
-          </div>
-
-          <Toast msg={pwdMsg} type="success" />
-          <Toast msg={pwdErr} type="error" />
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button type="submit" className="btn btn-primary" disabled={savingPwd}
-              style={{ display: 'flex', alignItems: 'center', gap: 7, background: '#6366f1', borderColor: '#6366f1' }}>
-              <Lock size={15} />
-              {savingPwd ? 'Updating…' : 'Update Password'}
-            </button>
-          </div>
-        </form>
       </div>
 
     </div>

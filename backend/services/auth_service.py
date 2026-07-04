@@ -1,24 +1,16 @@
 """
-Auth Service — JWT token management and password hashing.
+Auth Service — JWT token management for device-bound authentication.
+
+There's no password anymore (see routes/auth.py's /device endpoint) — a
+device silently gets an account and a long-lived token stands in for a
+login session for as long as that browser holds onto it.
 """
 import logging
-import bcrypt as _bcrypt_lib
 from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
-
-
-def hash_password(plain: str) -> str:
-    return _bcrypt_lib.hashpw(plain.encode("utf-8"), _bcrypt_lib.gensalt()).decode("utf-8")
-
-
-def verify_password(plain: str, hashed: str) -> bool:
-    try:
-        return _bcrypt_lib.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
-    except Exception:
-        return False
 
 
 def create_access_token(user_id: int, email: str, name: str) -> str:

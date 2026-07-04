@@ -16,8 +16,7 @@ _PUBLIC_PREFIXES = (
     "/openapi.json",
 )
 _PUBLIC_EXACT = {
-    "/api/v1/auth/login",
-    "/api/v1/auth/register",
+    "/api/v1/auth/device",                # Silent device provisioning — issues the JWT itself
     "/api/v1/whatsapp/events",            # SSE — EventSource can't send headers
     "/api/v1/whatsapp/webhook",           # Bridge calls this internally
     "/api/v1/contacts/sync-progress",     # SSE — EventSource can't send headers

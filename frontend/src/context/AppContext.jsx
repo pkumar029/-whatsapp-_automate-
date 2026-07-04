@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react'
-import { whatsappApi, contactsApi, messagesApi, authApi } from '../services/api'
+import { whatsappApi, contactsApi, messagesApi } from '../services/api'
 import { useAuth } from './AuthContext'
 
 const AppContext = createContext()
@@ -37,11 +37,6 @@ export function AppProvider({ children }) {
       localStorage.setItem('wa_profile', JSON.stringify(next))
       return next
     })
-  }
-
-  const changePassword = async (oldPassword, newPassword) => {
-    const res = await authApi.changePassword({ old_password: oldPassword, new_password: newPassword })
-    return res.data
   }
 
   // ─── WhatsApp Profile (connected account's name/pic/phone) ──
@@ -230,7 +225,6 @@ export function AppProvider({ children }) {
       toggleTheme,
       profile,
       updateProfile,
-      changePassword,
       sessionStatus,
       setSessionStatus,
       refreshSessionStatus,

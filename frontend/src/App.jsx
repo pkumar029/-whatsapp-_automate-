@@ -10,7 +10,6 @@ import Campaigns from './pages/Campaigns/Campaigns'
 import Profile from './pages/Profile/Profile'
 import Status from './pages/Status/Status'
 import Login from './pages/Login/Login'
-import Welcome from './pages/Auth/Auth'
 import { useApp } from './context/AppContext'
 import { useAuth } from './context/AuthContext'
 
@@ -45,11 +44,31 @@ const Spinner = ({ label }) => (
   </div>
 )
 
-// Layer 1: must be JWT-authenticated
+// Layer 1: needs a device account/token — provisioned silently, no login form.
+// If that provisioning call itself failed (e.g. backend unreachable), there's
+// nowhere to navigate to instead — show a retry rather than a dead end.
 function AuthRoute() {
-  const { isAuthenticated, authLoading } = useAuth()
+  const { isAuthenticated, authLoading, authError, retryAuth } = useAuth()
   if (authLoading) return <Spinner label="Loading…" />
-  if (!isAuthenticated) return <Navigate to="/auth" replace />
+  if (!isAuthenticated) {
+    return (
+      <div style={{
+        display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh',
+        background: 'radial-gradient(circle at center, #1a202c 0%, #0d1117 100%)',
+        color: 'var(--text-muted)', fontFamily: 'system-ui, sans-serif',
+      }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, textAlign: 'center', maxWidth: 360 }}>
+          <div>{authError || 'Could not start a session.'}</div>
+          <button onClick={retryAuth} style={{
+            background: 'var(--accent-primary, #25D366)', color: '#000', border: 'none',
+            borderRadius: 8, padding: '10px 20px', fontWeight: 700, cursor: 'pointer',
+          }}>
+            Retry
+          </button>
+        </div>
+      </div>
+    )
+  }
   return <Outlet />
 }
 
@@ -65,13 +84,11 @@ function App() {
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
-        {/* Welcome / landing page */}
-        <Route path="auth" element={<Welcome />} />
-
-        {/* JWT required from here on */}
+        {/* Device account required from here on (auto-provisioned, invisible) */}
         <Route element={<AuthRoute />}>
-          {/* WhatsApp QR login — JWT required, WhatsApp not yet required */}
+          {/* WhatsApp connect screen — this IS the app's "login" now */}
           <Route path="login" element={<Login />} />
+          <Route path="auth" element={<Navigate to="/login" replace />} />
 
           {/* Full app — JWT + WhatsApp connected */}
           <Route element={<ProtectedRoute />}>

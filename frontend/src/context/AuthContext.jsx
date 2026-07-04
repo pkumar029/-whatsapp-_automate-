@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { authApi } from '../services/api'
 
 const AuthContext = createContext()
@@ -8,46 +8,61 @@ const TOKEN_KEY = 'wa_token'
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
+  const [authError, setAuthError] = useState('')
+  const provisioning = useRef(false)
 
   const isAuthenticated = !!user
 
-  // On mount: if a token is stored, verify it's still valid and load the
-  // real user. No token (or an invalid one) just means "not logged in".
+  // No email/password — silently create a device-bound account (and its
+  // token) the moment this browser has no valid session. There's nothing for
+  // the user to fill in; this is what stands in for "logging in".
+  const provisionDevice = useCallback(async () => {
+    if (provisioning.current) return null
+    provisioning.current = true
+    try {
+      const res = await authApi.device()
+      const { access_token, user: userData } = res.data
+      localStorage.setItem(TOKEN_KEY, access_token)
+      setUser(userData)
+      setAuthError('')
+      return userData
+    } catch (_) {
+      setAuthError('Could not reach the server to start a session. Check your connection and retry.')
+      return null
+    } finally {
+      provisioning.current = false
+    }
+  }, [])
+
+  // On mount: an existing token just needs its user loaded; no token (or an
+  // invalid/expired one) means silently provisioning a fresh device account.
   useEffect(() => {
     const token = localStorage.getItem(TOKEN_KEY)
     if (!token) {
-      setAuthLoading(false)
+      provisionDevice().finally(() => setAuthLoading(false))
       return
     }
     authApi.me()
       .then(res => setUser(res.data))
-      .catch(() => localStorage.removeItem(TOKEN_KEY))
+      .catch(async () => {
+        localStorage.removeItem(TOKEN_KEY)
+        await provisionDevice()
+      })
       .finally(() => setAuthLoading(false))
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // api.js dispatches this on any 401 — drop the stale session so
-  // AuthRoute redirects to /auth.
+  // api.js dispatches this on any 401 — the stored token is dead, so drop it
+  // and silently get a new device account rather than stranding the user on
+  // a dead end (there's no login form to send them back to).
   useEffect(() => {
-    const handler = () => setUser(null)
+    const handler = () => {
+      setUser(null)
+      localStorage.removeItem(TOKEN_KEY)
+      provisionDevice()
+    }
     window.addEventListener('auth:unauthorized', handler)
     return () => window.removeEventListener('auth:unauthorized', handler)
-  }, [])
-
-  const login = useCallback(async (username, password) => {
-    const res = await authApi.login({ username, password })
-    const { access_token, user: userData } = res.data
-    localStorage.setItem(TOKEN_KEY, access_token)
-    setUser(userData)
-    return userData
-  }, [])
-
-  const register = useCallback(async (name, username, password) => {
-    const res = await authApi.register({ name, username, password })
-    const { access_token, user: userData } = res.data
-    localStorage.setItem(TOKEN_KEY, access_token)
-    setUser(userData)
-    return userData
-  }, [])
+  }, [provisionDevice])
 
   const logout = useCallback(async () => {
     try { await authApi.logout() } catch (_) {}
@@ -56,7 +71,10 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('wa_last_sync')
     localStorage.removeItem('wa_whatsapp_profile')
     setUser(null)
-  }, [])
+    // Immediately hand back a fresh device account — "log out" here really
+    // means "disconnect and start a new WhatsApp connection from scratch".
+    await provisionDevice()
+  }, [provisionDevice])
 
   const refreshUser = useCallback(async () => {
     try {
@@ -73,8 +91,8 @@ export function AuthProvider({ children }) {
       user,
       isAuthenticated,
       authLoading,
-      login,
-      register,
+      authError,
+      retryAuth: provisionDevice,
       logout,
       refreshUser,
     }}>

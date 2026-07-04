@@ -165,13 +165,13 @@ export const statusApi = {
 }
 
 // ─── Auth API ─────────────────────────────────────────────────
+// No email/password — device() silently provisions an account the first
+// time a browser has no stored token (see AuthContext).
 export const authApi = {
-  login: (data) => api.post('/auth/login', data),
-  register: (data) => api.post('/auth/register', data),
+  device: () => api.post('/auth/device'),
   logout: () => api.post('/auth/logout'),
   me: () => api.get('/auth/me'),
   updateMe: (data) => api.put('/auth/me', data),
-  changePassword: (data) => api.post('/auth/change-password', data),
 }
 
 // ─── AI Smart Reply ───────────────────────────────────────────
