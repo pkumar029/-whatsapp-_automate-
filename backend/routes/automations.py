@@ -1,13 +1,14 @@
 """
 Automations Routes — CRUD, steps, activate/deactivate, run
 """
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, BackgroundTasks
 from typing import Optional
 from sqlalchemy.orm import Session
 from database.connection import get_db, SessionLocal
 from services import automations_service
 from services.automation_runner import run_automation
 from models.schemas import AutomationCreate, AutomationUpdate, AutomationListResponse, StepSchema
+from models.models import TriggerType
 from dependencies import current_user_id
 
 router = APIRouter(prefix="/automations", tags=["Automations"])
@@ -183,20 +184,34 @@ async def duplicate_automation(automation_id: int, db: Session = Depends(get_db)
 
 
 @router.post("/{automation_id}/webhook-trigger")
-async def webhook_trigger(automation_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
+async def webhook_trigger(automation_id: int, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """External systems can POST here to trigger a webhook_received automation.
     Requires the owner's JWT like every other route now that auth is real —
-    an anonymous/shared webhook secret would be a separate feature."""
+    an anonymous/shared webhook secret would be a separate feature.
+
+    Any JSON body sent is parsed and merged into the run's trigger context, so
+    step templates can reference it (e.g. `{{order_id}}`)."""
     automation = automations_service.get_automation_by_id(db, automation_id, user_id)
     if not automation:
         raise HTTPException(status_code=404, detail="Automation not found")
+    if automation.trigger_type != TriggerType.webhook_received:
+        raise HTTPException(status_code=400, detail="This automation is not configured for webhook triggers")
     if not automation.is_active:
         raise HTTPException(status_code=400, detail="Automation is not active")
+
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            body = {}
+    except Exception:
+        body = {}
+
+    trigger_data = {"trigger": "webhook_received", **body}
 
     def _bg():
         bg_db = SessionLocal()
         try:
-            run_automation(bg_db, automation_id, {"trigger": "webhook_received"})
+            run_automation(bg_db, automation_id, trigger_data)
         except Exception as e:
             import logging
             logging.getLogger(__name__).error(f"Webhook trigger run failed: {e}")

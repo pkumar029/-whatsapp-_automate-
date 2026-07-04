@@ -119,6 +119,55 @@ def get_contact_by_phone(db: Session, phone: str, user_id: int, wa_account: Opti
     return q.first()
 
 
+def fire_contact_event(db: Session, user_id: int, wa_account: Optional[str], trigger_type_value: str, trigger_data: dict) -> None:
+    """Fire contact_added / contact_tag_added automations for this user in the
+    background. Mirrors the pattern used for inbound-message triggers
+    (routes/whatsapp.py webhook) and scheduled triggers (queue_service.py) —
+    those fire correctly; this event type previously had no caller at all,
+    so contact_added/contact_tag_added automations never ran."""
+    import threading
+    from models.models import Automation, TriggerType
+
+    try:
+        trigger_enum = TriggerType(trigger_type_value)
+    except ValueError:
+        return
+
+    try:
+        automations = db.query(Automation).filter(
+            Automation.is_active == True,
+            Automation.user_id == user_id,
+            Automation.trigger_type == trigger_enum,
+        ).filter(
+            (Automation.wa_account == wa_account) | Automation.wa_account.is_(None)
+        ).all()
+    except Exception as e:
+        logger.error(f"fire_contact_event: lookup failed for {trigger_type_value}: {e}")
+        return
+
+    for automation in automations:
+        if trigger_enum == TriggerType.contact_tag_added:
+            wanted_tag = (automation.trigger_config or {}).get("tag")
+            if wanted_tag and wanted_tag != trigger_data.get("tag"):
+                continue
+
+        def run_bg(auto_id=automation.id, auto_name=automation.name, trig=dict(trigger_data)):
+            from database.connection import SessionLocal
+            from services.automation_runner import run_automation
+            bg_db = SessionLocal()
+            try:
+                logger.info(f"Triggering automation '{auto_name}' (ID: {auto_id}) via {trigger_type_value}")
+                run_automation(bg_db, auto_id, trig)
+            except Exception as e:
+                logger.error(f"Background automation run failed (auto {auto_id}): {e}")
+            finally:
+                bg_db.close()
+
+        t = threading.Thread(target=run_bg)
+        t.daemon = True
+        t.start()
+
+
 def create_contact(
     db: Session,
     data: ContactCreate,
@@ -168,6 +217,9 @@ def create_contact(
     db.add(contact)
     db.commit()
     db.refresh(contact)
+    fire_contact_event(db, user_id, resolved_wa, "contact_added", {
+        "contact_id": contact.id, "phone": contact.phone, "name": contact.name,
+    })
     return contact
 
 
@@ -175,10 +227,18 @@ def update_contact(db: Session, contact_id: int, data: ContactUpdate, user_id: i
     contact = get_contact_by_id(db, contact_id, user_id)
     if not contact:
         return None
-    for key, value in data.model_dump(exclude_unset=True).items():
+    old_tags = list(contact.tags or [])
+    updates = data.model_dump(exclude_unset=True)
+    for key, value in updates.items():
         setattr(contact, key, value)
     db.commit()
     db.refresh(contact)
+    if "tags" in updates:
+        added_tags = [t for t in (contact.tags or []) if t not in old_tags]
+        for tag in added_tags:
+            fire_contact_event(db, user_id, contact.wa_account, "contact_tag_added", {
+                "contact_id": contact.id, "phone": contact.phone, "tag": tag,
+            })
     return contact
 
 

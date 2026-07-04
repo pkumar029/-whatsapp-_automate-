@@ -32,9 +32,15 @@ def broadcast_message_event(user_id: int, data: dict) -> None:
             pass
 
 @router.get("/stream")
-async def message_stream(request: Request, user_id: int = Query(...)):
-    """Server-Sent Events endpoint — pushes new inbound messages in real-time,
-    scoped to the requesting user via a query param (see broadcaster note above)."""
+async def message_stream(request: Request, user_id: int = Query(...), token: str = Query(...)):
+    """Server-Sent Events endpoint — pushes new inbound messages in real-time.
+    Public (EventSource can't send auth headers), so the caller's JWT is passed
+    as a query param instead and verified against user_id — without this check
+    anyone could pass an arbitrary user_id and read another user's message
+    content live."""
+    from services.auth_service import user_id_from_token
+    if user_id_from_token(token) != user_id:
+        raise HTTPException(status_code=401, detail="Invalid or mismatched token")
     queue: asyncio.Queue = asyncio.Queue(maxsize=100)
     _sse_queues.setdefault(user_id, []).append(queue)
 
@@ -97,10 +103,38 @@ async def sync_messages(db: Session = Depends(get_db), user_id: int = Depends(cu
 
 @router.post("/send", status_code=201)
 async def send_message(data: MessageSend, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
-    """Send a WhatsApp message."""
+    """Send a WhatsApp message.
+
+    A message row is always saved (for the send-attempt log), but this only
+    ever reports success when WhatsApp actually accepted the message — a
+    failed send raises so the client sees the real reason instead of a
+    false "sent".
+    """
+    from services.whatsapp_service import WhatsAppSendError, ServiceUnavailableError
     try:
         msg = messages_service.send_message(db, data, user_id)
         return {"success": True, "message_id": msg.id, "status": msg.status.value}
+    except ServiceUnavailableError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except WhatsAppSendError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{message_id}/retry")
+async def retry_message(message_id: int, db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
+    """Retry a previously failed outbound message."""
+    from services.whatsapp_service import WhatsAppSendError, ServiceUnavailableError
+    try:
+        msg = messages_service.retry_message(db, message_id, user_id)
+        return {"success": True, "message_id": msg.id, "status": msg.status.value}
+    except ServiceUnavailableError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except WhatsAppSendError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

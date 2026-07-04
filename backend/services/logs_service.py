@@ -40,10 +40,16 @@ def save_log_settings(db: Session, logging_enabled: bool, max_log_entries: int, 
     return get_log_settings(db)
 
 
-def _user_log_ids_query(db: Session, user_id: int):
+def _user_log_ids_query(db: Session, user_id: int, wa_account: Optional[str] = None):
     """AutomationLog has no user_id of its own — ownership flows through
-    automation_id — so every log query joins through Automation."""
-    return db.query(AutomationLog).join(Automation, AutomationLog.automation_id == Automation.id).filter(Automation.user_id == user_id)
+    automation_id — so every log query joins through Automation. Always
+    filtered by the authenticated user_id (never a client-supplied value);
+    optionally further scoped to the active WhatsApp account, same as the
+    automations/campaigns lists."""
+    query = db.query(AutomationLog).join(Automation, AutomationLog.automation_id == Automation.id).filter(Automation.user_id == user_id)
+    if wa_account:
+        query = query.filter((Automation.wa_account == wa_account) | Automation.wa_account.is_(None))
+    return query
 
 
 def trim_to_limit(db: Session, max_entries: int, user_id: int) -> int:
@@ -68,8 +74,8 @@ def trim_to_limit(db: Session, max_entries: int, user_id: int) -> int:
     return len(oldest_ids)
 
 
-def export_logs_data(db: Session, user_id: int) -> list:
-    logs = _user_log_ids_query(db, user_id).order_by(AutomationLog.started_at.desc()).all()
+def export_logs_data(db: Session, user_id: int, wa_account: Optional[str] = None) -> list:
+    logs = _user_log_ids_query(db, user_id, wa_account).order_by(AutomationLog.started_at.desc()).all()
     result = []
     for log in logs:
         automation = db.query(Automation).filter(Automation.id == log.automation_id).first()
@@ -96,6 +102,7 @@ def get_logs(
     search: Optional[str] = None,
     status: Optional[str] = None,
     automation_id: Optional[int] = None,
+    wa_account: Optional[str] = None,
 ) -> dict:
     # Auto-maintenance: trim to configured max on every fetch (cheap no-op when under limit)
     cfg = get_log_settings(db)
@@ -103,7 +110,7 @@ def get_logs(
     if max_entries > 0:
         trim_to_limit(db, max_entries, user_id)
 
-    query = _user_log_ids_query(db, user_id)
+    query = _user_log_ids_query(db, user_id, wa_account)
 
     if status:
         query = query.filter(AutomationLog.status == status)
@@ -145,8 +152,8 @@ def get_log_by_id(db: Session, log_id: int, user_id: int) -> Optional[Automation
     return _user_log_ids_query(db, user_id).filter(AutomationLog.id == log_id).first()
 
 
-def clear_logs(db: Session, user_id: int) -> int:
-    ids = [row.id for row in _user_log_ids_query(db, user_id).with_entities(AutomationLog.id).all()]
+def clear_logs(db: Session, user_id: int, wa_account: Optional[str] = None) -> int:
+    ids = [row.id for row in _user_log_ids_query(db, user_id, wa_account).with_entities(AutomationLog.id).all()]
     if ids:
         db.query(AutomationLog).filter(AutomationLog.id.in_(ids)).delete(synchronize_session=False)
         db.commit()

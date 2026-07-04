@@ -220,7 +220,7 @@ function ReactionPicker({ onPick, style }) {
 }
 
 // ─── Message Bubble ─────────────────────────────────────────────
-function MessageBubble({ m, isOut, contactName, reaction, isStarred, isLast, onContextMenu, onReply, onReact, setLightboxImg }) {
+function MessageBubble({ m, isOut, contactName, reaction, isStarred, isLast, onContextMenu, onReply, onReact, setLightboxImg, onRetry }) {
   const [hovered, setHovered] = useState(false)
   const [showReactPicker, setShowReactPicker] = useState(false)
   const { replyFrom, replyQuote, text } = parseContent(m.content)
@@ -336,6 +336,21 @@ function MessageBubble({ m, isOut, contactName, reaction, isStarred, isLast, onC
         {text && !(m.media_type === 'file' && m.media_url) && (
           <div style={{ fontSize: 14, color: '#e9edef', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.45 }}>
             {text}
+          </div>
+        )}
+
+        {/* Failed — real reason + retry */}
+        {isOut && m.status === 'failed' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+            <span style={{ fontSize: 11, color: '#ff6b6b', flex: 1 }}>
+              {m.error_message || 'Failed to send'}
+            </span>
+            <button
+              onClick={() => onRetry(m.id)}
+              style={{ background: 'rgba(255,68,68,0.15)', border: '1px solid rgba(255,68,68,0.4)', borderRadius: 4, color: '#ff9d9d', fontSize: 11, padding: '2px 8px', cursor: 'pointer', flexShrink: 0 }}
+            >
+              Retry
+            </button>
           </div>
         )}
 
@@ -1322,6 +1337,10 @@ export default function Messages() {
   const handleSend = async (textToSend, mediaInfo = null, targetContact = null) => {
     const contact = targetContact || selectedContact
     if (!contact || !textToSend?.trim()) return
+    if (sessionStatus.status !== 'connected') {
+      alert('❌ WhatsApp is not connected.\nPlease reconnect your account.')
+      return
+    }
     let content = textToSend
     if (!targetContact && replyTo) {
       const qText = parseContent(replyTo.content).text || replyTo.content || ''
@@ -1331,10 +1350,27 @@ export default function Messages() {
     }
     const payload = { contact_id: contact.id, phone: contact.phone, message: content }
     if (mediaInfo) { payload.media_url = mediaInfo.url; payload.media_type = mediaInfo.type }
+    if (!targetContact) setNewMessage('')
     try {
       await messagesApi.send(payload)
-      if (!targetContact) { setNewMessage(''); fetchMessages() }
-    } catch (err) { alert(getErrorMessage(err, 'Failed to send message.')) }
+    } catch (err) {
+      // The message row was still saved (as failed) — surface the real
+      // reason instead of pretending it sent.
+      alert(getErrorMessage(err, 'Failed to send message.'))
+    } finally {
+      if (!targetContact) fetchMessages()
+    }
+  }
+
+  // Re-attempt a failed outbound message using its stored phone/content.
+  const handleRetry = async (messageId) => {
+    try {
+      await messagesApi.retry(messageId)
+    } catch (err) {
+      alert(getErrorMessage(err, 'Retry failed.'))
+    } finally {
+      fetchMessages()
+    }
   }
 
   const handleFileChange = (e, type) => {
@@ -2003,6 +2039,7 @@ export default function Messages() {
                         onReply={setReplyTo}
                         onReact={handleReact}
                         setLightboxImg={setLightboxImg}
+                        onRetry={handleRetry}
                       />
                     </div>
                   )

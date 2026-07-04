@@ -20,6 +20,12 @@ class LogSettingsBody(BaseModel):
     max_log_entries: int = 0
 
 
+def _active_wa_account(db: Session, user_id: int) -> Optional[str]:
+    from models.models import WhatsappSession, SessionStatus as SS
+    session = db.query(WhatsappSession).filter(WhatsappSession.user_id == user_id, WhatsappSession.status == SS.connected).first()
+    return session.phone if session else None
+
+
 @router.get("", response_model=LogListResponse)
 async def list_logs(
     page: int = Query(1, ge=1),
@@ -30,8 +36,12 @@ async def list_logs(
     db: Session = Depends(get_db),
     user_id: int = Depends(current_user_id),
 ):
-    """List automation execution logs with filtering."""
-    return logs_service.get_logs(db, user_id, page=page, limit=limit, search=search, status=status, automation_id=automation_id)
+    """List this user's automation execution logs, scoped to the currently
+    connected WhatsApp account. user_id always comes from the JWT (via
+    current_user_id) — never from the client — so one user can never see
+    another user's logs."""
+    wa_account = _active_wa_account(db, user_id)
+    return logs_service.get_logs(db, user_id, page=page, limit=limit, search=search, status=status, automation_id=automation_id, wa_account=wa_account)
 
 
 @router.get("/settings")
@@ -49,7 +59,7 @@ async def save_log_settings(body: LogSettingsBody, db: Session = Depends(get_db)
 @router.get("/export")
 async def export_logs(db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
     """Export this user's logs as a CSV file."""
-    rows = logs_service.export_logs_data(db, user_id)
+    rows = logs_service.export_logs_data(db, user_id, wa_account=_active_wa_account(db, user_id))
     output = io.StringIO()
     fields = ["id", "automation_name", "status", "started_at", "finished_at",
               "execution_time_ms", "steps_executed", "total_steps", "error_message", "log_output"]
@@ -78,8 +88,8 @@ async def logs_by_automation(
 
 @router.delete("")
 async def clear_logs(db: Session = Depends(get_db), user_id: int = Depends(current_user_id)):
-    """Clear this user's execution logs."""
-    count = logs_service.clear_logs(db, user_id)
+    """Clear this user's execution logs (scoped to their currently connected account)."""
+    count = logs_service.clear_logs(db, user_id, wa_account=_active_wa_account(db, user_id))
     return {"success": True, "deleted": count}
 
 

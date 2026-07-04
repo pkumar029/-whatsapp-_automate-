@@ -83,11 +83,13 @@ async def sync_contacts(background_tasks: BackgroundTasks, db: Session = Depends
 
 
 @router.get("/sync-progress")
-async def sync_progress(request: Request, user_id: int = Query(...)):
+async def sync_progress(request: Request, user_id: int = Query(...), token: str = Query(...)):
     """SSE endpoint — streams contact sync progress in real time.
-    Public (EventSource can't send auth headers), so the caller passes
-    user_id explicitly as a query param — this only exposes sync progress
-    percentages, never contact data, so a wrong/spoofed id is low-risk."""
+    Public (EventSource can't send auth headers), so the caller's JWT is
+    passed as a query param instead and verified against user_id."""
+    from services.auth_service import user_id_from_token
+    if user_id_from_token(token) != user_id:
+        raise HTTPException(status_code=401, detail="Invalid or mismatched token")
 
     async def generator():
         while True:
@@ -180,6 +182,10 @@ async def import_contacts(file: UploadFile = File(...), db: Session = Depends(ge
                             tags=tags, wa_account=wa_account)
                 db.add(c)
                 db.commit()
+                db.refresh(c)
+                contacts_service.fire_contact_event(db, user_id, wa_account, "contact_added", {
+                    "contact_id": c.id, "phone": c.phone, "name": c.name,
+                })
                 created += 1
         except Exception as e:
             db.rollback()

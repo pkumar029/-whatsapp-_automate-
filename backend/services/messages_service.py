@@ -2,15 +2,22 @@
 Messages Service — send, validate, save records, track status, sync history
 """
 import logging
+import time
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 from models.models import Message, Contact, MessageDirection, MessageStatus
 from models.schemas import MessageSend
 from services import whatsapp_service
+from services.whatsapp_service import WhatsAppSendError
 
 logger = logging.getLogger(__name__)
+
+# Retryable send failures (bridge hiccup, timeout) get a couple of automatic
+# attempts before we give up and mark the message failed.
+MAX_SEND_ATTEMPTS = 3
+_RETRY_BACKOFF_SECONDS = (1, 2)
 
 
 def _active_account(db: Session, user_id: int) -> Optional[str]:
@@ -72,7 +79,13 @@ def get_messages(
 
 
 def send_message(db: Session, data: MessageSend, user_id: int) -> Message:
-    """Validate, send via WhatsApp, and save message record."""
+    """Validate, send via WhatsApp, and save message record.
+
+    Retries retryable failures (bridge hiccup/timeout) a couple of times
+    before giving up. Always re-raises the final error so the caller (the
+    /send route) reports the real outcome instead of a false "success" —
+    the Message row is saved either way for the send-attempt log.
+    """
     phone = data.phone
     contact_id = data.contact_id
     contact = None
@@ -89,6 +102,22 @@ def send_message(db: Session, data: MessageSend, user_id: int) -> Message:
 
     wa_account = _active_account(db, user_id)
 
+    # Guard against accidental double-submits (e.g. a double click) — an
+    # identical outbound message to the same number in the last few seconds
+    # is treated as a dup rather than sent again.
+    dup_cutoff = datetime.utcnow() - timedelta(seconds=5)
+    dup = db.query(Message).filter(
+        Message.user_id == user_id,
+        Message.phone == phone,
+        Message.content == data.message,
+        Message.direction == MessageDirection.outbound,
+        Message.status != MessageStatus.failed,
+        Message.created_at >= dup_cutoff,
+    ).order_by(Message.id.desc()).first()
+    if dup:
+        logger.info(f"Duplicate send suppressed for {phone} (message {dup.id})")
+        return dup
+
     msg = Message(
         user_id=user_id,
         contact_id=contact_id,
@@ -104,19 +133,65 @@ def send_message(db: Session, data: MessageSend, user_id: int) -> Message:
     db.commit()
     db.refresh(msg)
 
+    last_error = None
+    for attempt in range(1, MAX_SEND_ATTEMPTS + 1):
+        try:
+            result = whatsapp_service.send_whatsapp_message(db, phone, data.message, user_id, contact=contact)
+            msg.status = MessageStatus.sent
+            msg.whatsapp_message_id = result.get("message_id")
+            msg.sent_at = datetime.utcnow()
+            msg.error_message = None
+            msg.retry_count = attempt - 1
+            db.commit()
+            db.refresh(msg)
+            return msg
+        except Exception as e:
+            last_error = e
+            msg.retry_count = attempt - 1
+            retryable = isinstance(e, WhatsAppSendError) and e.retryable
+            if not retryable or attempt == MAX_SEND_ATTEMPTS:
+                break
+            wait = _RETRY_BACKOFF_SECONDS[min(attempt - 1, len(_RETRY_BACKOFF_SECONDS) - 1)]
+            logger.warning(f"Send attempt {attempt} to {phone} failed (retryable): {e} — retrying in {wait}s")
+            time.sleep(wait)
+
+    logger.error(f"Failed to send message to {phone} after {msg.retry_count + 1} attempt(s): {last_error}")
+    msg.status = MessageStatus.failed
+    msg.error_message = str(last_error)
+    db.commit()
+    db.refresh(msg)
+    raise last_error
+
+
+def retry_message(db: Session, message_id: int, user_id: int) -> Message:
+    """Re-attempt a previously failed outbound message using its stored
+    phone/content. Raises the same error types as send_whatsapp_message —
+    the caller reports the real outcome rather than assuming success."""
+    msg = db.query(Message).filter(Message.id == message_id, Message.user_id == user_id).first()
+    if not msg:
+        raise ValueError("Message not found")
+    if msg.direction != MessageDirection.outbound:
+        raise ValueError("Only outbound messages can be retried")
+    if msg.status != MessageStatus.failed:
+        raise ValueError("Only failed messages can be retried")
+
+    contact = db.query(Contact).filter(Contact.id == msg.contact_id).first() if msg.contact_id else None
+
     try:
-        result = whatsapp_service.send_whatsapp_message(db, phone, data.message, user_id, contact=contact)
+        result = whatsapp_service.send_whatsapp_message(db, msg.phone, msg.content, user_id, contact=contact)
         msg.status = MessageStatus.sent
         msg.whatsapp_message_id = result.get("message_id")
         msg.sent_at = datetime.utcnow()
+        msg.error_message = None
+        return msg
     except Exception as e:
-        logger.error(f"Failed to send message: {e}")
-        msg.status = MessageStatus.failed
+        logger.error(f"Retry failed for message {message_id}: {e}")
         msg.error_message = str(e)
-
-    db.commit()
-    db.refresh(msg)
-    return msg
+        raise
+    finally:
+        msg.retry_count = (msg.retry_count or 0) + 1
+        db.commit()
+        db.refresh(msg)
 
 
 def sync_message_history(db: Session, user_id: int) -> dict:
