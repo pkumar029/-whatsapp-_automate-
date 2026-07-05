@@ -155,6 +155,23 @@ async def lifespan(app: FastAPI):
          "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
          "  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
          ")"),
+        # uq_contact_phone_account (added above, before Phase 0 multi-tenancy)
+        # was never widened to include user_id — so the SAME phone/group under
+        # the SAME wa_account can't exist as separate rows for two different
+        # users, even though every other contacts query is user_id-scoped.
+        # That's exactly what a device-account reset (see /auth/device) plus a
+        # WhatsApp reconnect produces, and it crashes contact sync with
+        # IntegrityError 1062. Widen it to the correctly-scoped key.
+        ("contacts drop pre-multi-tenant phone+wa_account unique",
+         "ALTER TABLE contacts DROP INDEX uq_contact_phone_account"),
+        # Some databases ended up with a global phone-only unique index under
+        # this name instead (the original "DROP INDEX phone" migration above
+        # only matches an index literally named `phone`) — even more
+        # restrictive than the one above, drop it too if present.
+        ("contacts drop legacy global phone-only unique (if present)",
+         "ALTER TABLE contacts DROP INDEX uq_contacts_phone"),
+        ("contacts composite user+phone+wa_account unique",
+         "ALTER TABLE contacts ADD UNIQUE KEY uq_contact_user_phone_account (user_id, phone, wa_account)"),
     ]
     import asyncio
     def _run_migrations():
@@ -166,7 +183,12 @@ async def lifespan(app: FastAPI):
                 logger.info(f"✅ Migration OK: {_name}")
             except Exception as _e:
                 _msg = str(_e)
-                if "Duplicate column" not in _msg and "already exists" not in _msg.lower():
+                _benign = (
+                    "Duplicate column" in _msg
+                    or "already exists" in _msg.lower()
+                    or "check that column/key exists" in _msg.lower()
+                )
+                if not _benign:
                     logger.warning(f"Migration note ({_name}): {_msg}")
 
     await asyncio.get_event_loop().run_in_executor(None, _run_migrations)

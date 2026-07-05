@@ -308,7 +308,11 @@ def sync_whatsapp_contacts(db: Session, user_id: int, progress_callback: Optiona
         try:
             r = httpx.get(_wa_bridge_url(user_id, "/contacts"), timeout=90.0)
             if r.status_code != 200:
-                raise Exception(f"Bridge returned {r.status_code}: {r.text[:200]}")
+                try:
+                    friendly = r.json().get("error")
+                except Exception:
+                    friendly = None
+                raise Exception(friendly or f"Bridge returned {r.status_code}: {r.text[:200]}")
             wa_contacts = r.json().get("contacts", [])
             if not wa_contacts:
                 raise Exception(
@@ -395,10 +399,28 @@ def _upsert_contacts(
     user_id: int,
     progress_callback: Optional[Callable] = None,
 ) -> dict:
-    """Insert-or-update contacts from bridge into the database."""
+    """Insert-or-update contacts from bridge into the database.
+
+    Each row is upserted inside its own SAVEPOINT (db.begin_nested()) — if one
+    row hits an IntegrityError (e.g. a duplicate slipping through, or any
+    other per-row failure), only that row's SAVEPOINT rolls back; every other
+    row already flushed in this call stays intact and the sync continues.
+    Each row is also flushed immediately after add() so a later row in the
+    same batch that maps to the same (user_id, phone, wa_account) sees it as
+    "existing" instead of racing an INSERT against it — the session has
+    autoflush disabled project-wide, so without this explicit flush, two
+    same-phone entries within one 100-row batch would both look "new".
+    """
+    from sqlalchemy.exc import IntegrityError
+    import time as _time
+
+    start = _time.monotonic()
     new_count = 0
     updated_count = 0
+    skipped_count = 0
+    group_count = 0
     batch_size = 100
+    total_received = len(wa_contacts)
 
     for i, wc in enumerate(wa_contacts):
         phone = wc.get("phone", "").strip()
@@ -411,66 +433,84 @@ def _upsert_contacts(
             continue
         if c_type == "Broadcast":
             continue
+        if c_type == "Group":
+            group_count += 1
 
         valid = is_valid_contact_phone(phone)
         type_tag = "Group" if c_type == "Group" else None
 
-        # Scoped lookup first, then unscoped fallback (legacy data) — both
-        # constrained to this user so sync can never touch another user's contacts
-        existing = (
-            db.query(Contact)
-            .filter(Contact.phone == phone, Contact.wa_account == wa_account, Contact.user_id == user_id)
-            .first()
-        )
-        if not existing:
-            existing = (
-                db.query(Contact)
-                .filter(Contact.phone == phone, Contact.wa_account.is_(None), Contact.user_id == user_id)
-                .first()
-            )
+        try:
+            with db.begin_nested():
+                # Scoped lookup first, then unscoped fallback (legacy data) —
+                # both constrained to this user so sync can never touch
+                # another user's contacts.
+                existing = (
+                    db.query(Contact)
+                    .filter(Contact.phone == phone, Contact.wa_account == wa_account, Contact.user_id == user_id)
+                    .first()
+                )
+                if not existing:
+                    existing = (
+                        db.query(Contact)
+                        .filter(Contact.phone == phone, Contact.wa_account.is_(None), Contact.user_id == user_id)
+                        .first()
+                    )
 
-        if existing:
-            changed = False
-            if existing.name != name:
-                existing.name = name
-                changed = True
-            if existing.wa_account != wa_account:
-                existing.wa_account = wa_account
-                changed = True
-            if existing.is_valid != valid:
-                existing.is_valid = valid
-                changed = True
-            # Only upgrade is_my_contact (address-book status), never downgrade
-            if is_my_contact_bridge and not existing.is_my_contact:
-                existing.is_my_contact = True
-                changed = True
+                is_new = existing is None
+                if existing:
+                    changed = False
+                    if existing.name != name:
+                        existing.name = name
+                        changed = True
+                    if existing.wa_account != wa_account:
+                        existing.wa_account = wa_account
+                        changed = True
+                    if existing.is_valid != valid:
+                        existing.is_valid = valid
+                        changed = True
+                    # Only upgrade is_my_contact (address-book status), never downgrade
+                    if is_my_contact_bridge and not existing.is_my_contact:
+                        existing.is_my_contact = True
+                        changed = True
 
-            curr_tags = existing.tags or []
-            if not isinstance(curr_tags, list):
-                curr_tags = []
-            new_tags = [t for t in curr_tags if t not in ("Group", "Team", "User")]
-            if type_tag:
-                new_tags.append(type_tag)
-            if existing.tags != new_tags:
-                existing.tags = new_tags
-                changed = True
+                    curr_tags = existing.tags or []
+                    if not isinstance(curr_tags, list):
+                        curr_tags = []
+                    new_tags = [t for t in curr_tags if t not in ("Group", "Team", "User")]
+                    if type_tag:
+                        new_tags.append(type_tag)
+                    if existing.tags != new_tags:
+                        existing.tags = new_tags
+                        changed = True
 
-            if changed:
-                db.add(existing)
+                    if changed:
+                        db.add(existing)
+                else:
+                    changed = True
+                    contact = Contact(
+                        user_id=user_id,
+                        name=name,
+                        phone=phone,
+                        is_active=True,
+                        is_valid=valid,
+                        is_my_contact=is_my_contact_bridge,
+                        tags=[type_tag] if type_tag else [],
+                        wa_account=wa_account,
+                    )
+                    db.add(contact)
+
+                db.flush()
+
+            if is_new and changed:
+                new_count += 1
+            elif changed:
                 updated_count += 1
-        else:
-            contact = Contact(
-                user_id=user_id,
-                name=name,
-                phone=phone,
-                is_active=True,
-                is_valid=valid,
-                is_my_contact=is_my_contact_bridge,
-                tags=[type_tag] if type_tag else [],
-                wa_account=wa_account,
-            )
-            db.add(contact)
-            new_count += 1
+        except IntegrityError as ie:
+            skipped_count += 1
+            logger.warning(f"Skipped duplicate contact phone={phone!r} wa_account={wa_account!r} user={user_id}: {ie}")
+        except Exception as e:
+            skipped_count += 1
+            logger.error(f"Failed to upsert contact phone={phone!r} wa_account={wa_account!r} user={user_id}: {e}")
 
         if (i + 1) % batch_size == 0:
             db.commit()
@@ -480,7 +520,13 @@ def _upsert_contacts(
                 progress_callback(i + 1, len(wa_contacts), msg)
 
     db.commit()
-    return {"new": new_count, "updated": updated_count, "total": new_count + updated_count}
+    duration = round(_time.monotonic() - start, 2)
+    logger.info(
+        f"Contact sync (user {user_id}, {wa_account}): received={total_received} "
+        f"new={new_count} updated={updated_count} skipped={skipped_count} "
+        f"groups={group_count} duration={duration}s"
+    )
+    return {"new": new_count, "updated": updated_count, "total": new_count + updated_count, "skipped": skipped_count}
 
 
 def _build_sync_message(result: dict, wa_contacts: list, db: Session, wa_account: str, user_id: int) -> str:

@@ -34,21 +34,33 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
-  // On mount: an existing token just needs its user loaded; no token (or an
-  // invalid/expired one) means silently provisioning a fresh device account.
-  useEffect(() => {
+  // An existing token just needs its user loaded; no token (or one confirmed
+  // dead by a 401) means silently provisioning a fresh device account. Any
+  // OTHER failure (network hiccup, backend restart, timeout) is transient —
+  // the token is left untouched and this is safe to just retry, instead of
+  // destroying a perfectly valid account over a temporary blip.
+  const initAuth = useCallback(async () => {
     const token = localStorage.getItem(TOKEN_KEY)
     if (!token) {
-      provisionDevice().finally(() => setAuthLoading(false))
+      await provisionDevice()
       return
     }
-    authApi.me()
-      .then(res => setUser(res.data))
-      .catch(async () => {
+    try {
+      const res = await authApi.me()
+      setUser(res.data)
+      setAuthError('')
+    } catch (err) {
+      if (err.response?.status === 401) {
         localStorage.removeItem(TOKEN_KEY)
         await provisionDevice()
-      })
-      .finally(() => setAuthLoading(false))
+      } else {
+        setAuthError('Could not verify your session. Check your connection and retry.')
+      }
+    }
+  }, [provisionDevice])
+
+  useEffect(() => {
+    initAuth().finally(() => setAuthLoading(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // api.js dispatches this on any 401 — the stored token is dead, so drop it
@@ -92,7 +104,7 @@ export function AuthProvider({ children }) {
       isAuthenticated,
       authLoading,
       authError,
-      retryAuth: provisionDevice,
+      retryAuth: initAuth,
       logout,
       refreshUser,
     }}>

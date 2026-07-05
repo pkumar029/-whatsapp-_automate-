@@ -375,7 +375,7 @@ def run_automation(db: Session, automation_id: int, trigger_data: Optional[Dict]
         db.refresh(log)
         _max = _log_cfg["max_log_entries"]
         if _max > 0:
-            _ls.trim_to_limit(db, _max)
+            _ls.trim_to_limit(db, _max, automation.user_id)
 
     # Build execution context
     context: Dict[str, Any] = {

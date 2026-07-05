@@ -11,12 +11,15 @@ import { formatIST } from '../../utils/date'
 import { getErrorMessage } from '../../utils/error'
 
 // ─── Built-in Templates ────────────────────────────────────────
+// category is one of: Sales, Support, Marketing, HR, Education, Healthcare,
+// E-commerce, Restaurant, Real Estate, Events, Utilities
 const TEMPLATES = [
   {
     id: 'welcome',
     name: 'Welcome New Contact',
     description: 'Greet every new contact automatically when they are synced',
     emoji: '👋',
+    category: 'Sales',
     trigger_type: 'contact_added',
     trigger_config: {},
     steps: [
@@ -29,6 +32,7 @@ const TEMPLATES = [
     name: 'Auto-Reply: Hello',
     description: 'Instantly reply when someone says hi, hello, or hey',
     emoji: '💬',
+    category: 'Support',
     trigger_type: 'keyword_pattern',
     trigger_config: { pattern: 'hello|hi|hey', match_mode: 'regex' },
     steps: [
@@ -41,6 +45,7 @@ const TEMPLATES = [
     name: 'Support Ticket Handler',
     description: 'Auto-acknowledge support requests and tag the contact',
     emoji: '🎧',
+    category: 'Support',
     trigger_type: 'keyword',
     trigger_config: { keyword: 'support' },
     cooldown_minutes: 60,
@@ -56,6 +61,7 @@ const TEMPLATES = [
     name: 'Order Confirmation',
     description: 'Confirm orders when a message contains the word "order"',
     emoji: '📦',
+    category: 'E-commerce',
     trigger_type: 'keyword_pattern',
     trigger_config: { pattern: 'order', match_mode: 'contains' },
     cooldown_minutes: 30,
@@ -69,6 +75,7 @@ const TEMPLATES = [
     name: 'Daily Morning Broadcast',
     description: 'Send a message to all contacts every morning at 9am',
     emoji: '🌅',
+    category: 'Marketing',
     trigger_type: 'schedule',
     trigger_config: { cron: '0 9 * * *' },
     steps: [
@@ -77,9 +84,10 @@ const TEMPLATES = [
   },
   {
     id: 'vip_welcome',
-    name: 'VIP Member Welcome',
+    name: 'VIP Customer Welcome',
     description: 'Send a special message whenever a contact gets the "vip" tag',
     emoji: '⭐',
+    category: 'Sales',
     trigger_type: 'contact_tag_added',
     trigger_config: { tag: 'vip' },
     steps: [
@@ -88,9 +96,10 @@ const TEMPLATES = [
   },
   {
     id: 'follow_up',
-    name: 'Follow-up Sequence',
-    description: 'Send a follow-up message 10 seconds after initial interest',
+    name: 'Lead Qualification',
+    description: 'Follow up automatically when someone expresses interest',
     emoji: '🔄',
+    category: 'Sales',
     trigger_type: 'keyword',
     trigger_config: { keyword: 'interested' },
     cooldown_minutes: 120,
@@ -101,7 +110,395 @@ const TEMPLATES = [
       { step_type: 'add_tag', step_order: 4, config: { tag: 'leads' } },
     ],
   },
+  {
+    id: 'price_inquiry',
+    name: 'Price Inquiry Auto Reply',
+    description: 'Reply instantly whenever someone asks about pricing',
+    emoji: '💰',
+    category: 'Sales',
+    trigger_type: 'keyword_pattern',
+    trigger_config: { pattern: 'price|cost|how much|rate', match_mode: 'regex' },
+    cooldown_minutes: 30,
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}! 💰 Thanks for asking about pricing. Our team will share the latest price list with you shortly. Any specific product/service you\'re after?' } },
+      { step_type: 'add_tag', step_order: 2, config: { tag: 'price_inquiry' } },
+    ],
+  },
+  {
+    id: 'business_hours',
+    name: 'Business Hours Reply',
+    description: 'Let contacts know your working hours whenever they message',
+    emoji: '🕒',
+    category: 'Utilities',
+    trigger_type: 'message_received',
+    trigger_config: {},
+    cooldown_minutes: 180,
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}! 🕒 Our business hours are Mon–Sat, 9 AM – 7 PM. We\'ve received your message and will respond as soon as we\'re back online.' } },
+    ],
+  },
+  {
+    id: 'faq_auto_reply',
+    name: 'FAQ Auto Reply',
+    description: 'Answer common questions automatically (help, info, faq)',
+    emoji: '❓',
+    category: 'Support',
+    trigger_type: 'keyword_pattern',
+    trigger_config: { pattern: 'faq|help|info', match_mode: 'regex' },
+    cooldown_minutes: 60,
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}! Here are some quick answers:\n\n📍 Location: check our website\n⏰ Hours: Mon–Sat, 9 AM – 7 PM\n📞 Support: reply here anytime\n\nNeed something else? Just ask!' } },
+    ],
+  },
+  {
+    id: 'appointment_reminder',
+    name: 'Appointment Reminder',
+    description: 'Remind contacts about upcoming appointments every morning',
+    emoji: '📅',
+    category: 'Healthcare',
+    trigger_type: 'schedule',
+    trigger_config: { cron: '0 8 * * *' },
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}, this is a reminder for your appointment on {{date}} at {{time}}. Reply CONFIRM to confirm or RESCHEDULE if you need a new time.' } },
+      { step_type: 'log', step_order: 2, config: { message: 'Appointment reminder sent to {{name}} for {{date}} {{time}}' } },
+    ],
+  },
+  {
+    id: 'shipping_update',
+    name: 'Shipping Update',
+    description: 'Notify a customer the moment their order ships (via webhook)',
+    emoji: '🚚',
+    category: 'E-commerce',
+    trigger_type: 'webhook_received',
+    trigger_config: {},
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Good news, {{name}}! 🚚 Your order {{order_id}} has shipped and is on its way. We\'ll notify you again once it\'s out for delivery.' } },
+      { step_type: 'add_tag', step_order: 2, config: { tag: 'shipped' } },
+    ],
+  },
+  {
+    id: 'payment_reminder',
+    name: 'Payment Reminder',
+    description: 'Send a polite payment reminder on a recurring schedule',
+    emoji: '💳',
+    category: 'Utilities',
+    trigger_type: 'schedule',
+    trigger_config: { cron: '0 10 * * *' },
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}, this is a friendly reminder that payment for invoice {{order_id}} is due on {{date}}. Let us know if you have any questions.' } },
+    ],
+  },
+  {
+    id: 'payment_received',
+    name: 'Payment Received',
+    description: 'Confirm receipt of payment the moment it comes in (via webhook)',
+    emoji: '✅',
+    category: 'E-commerce',
+    trigger_type: 'webhook_received',
+    trigger_config: {},
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Thank you, {{name}}! ✅ We\'ve received your payment for order {{order_id}}. A receipt has been generated for your records.' } },
+      { step_type: 'add_tag', step_order: 2, config: { tag: 'paid' } },
+    ],
+  },
+  {
+    id: 'thank_you',
+    name: 'Thank You Message',
+    description: 'Send a warm thank-you note whenever someone says thanks',
+    emoji: '🙏',
+    category: 'Support',
+    trigger_type: 'keyword_pattern',
+    trigger_config: { pattern: 'thank you|thanks|thx', match_mode: 'regex' },
+    cooldown_minutes: 60,
+    steps: [
+      { step_type: 'react_message', step_order: 1, config: { emoji: '❤️' } },
+      { step_type: 'send_message', step_order: 2, config: { message: 'You\'re very welcome, {{name}}! 🙏 We\'re always happy to help. Have a great day!' } },
+    ],
+  },
+  {
+    id: 'feedback_collection',
+    name: 'Feedback Collection',
+    description: 'Ask a contact for feedback — run manually after service is done',
+    emoji: '📝',
+    category: 'Support',
+    trigger_type: 'manual',
+    trigger_config: {},
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}! We\'d love to hear your feedback on your recent experience with us. Could you share a quick comment or rating (1–5)?' } },
+      { step_type: 'add_tag', step_order: 2, config: { tag: 'feedback_requested' } },
+    ],
+  },
+  {
+    id: 'csat_survey',
+    name: 'Customer Satisfaction Survey',
+    description: 'Send a CSAT survey after a support ticket is closed (via webhook)',
+    emoji: '📊',
+    category: 'Support',
+    trigger_type: 'webhook_received',
+    trigger_config: {},
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}, your recent support ticket has been resolved. On a scale of 1–5, how satisfied were you with the support you received?' } },
+      { step_type: 'log', step_order: 2, config: { message: 'CSAT survey sent to {{name}} ({{phone}})' } },
+    ],
+  },
+  {
+    id: 'birthday_wishes',
+    name: 'Birthday Wishes',
+    description: 'Send a birthday greeting — schedule daily and target birthday contacts',
+    emoji: '🎂',
+    category: 'Marketing',
+    trigger_type: 'schedule',
+    trigger_config: { cron: '0 9 * * *' },
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: '🎉 Happy Birthday, {{name}}! Wishing you a fantastic year ahead. As a small token, enjoy a special discount on us today!' } },
+    ],
+  },
+  {
+    id: 'festival_greetings',
+    name: 'Festival Greetings',
+    description: 'Broadcast a festive greeting to all contacts',
+    emoji: '🎊',
+    category: 'Marketing',
+    trigger_type: 'manual',
+    trigger_config: {},
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: '🎊 Wishing you and your family a joyful festival season, {{name}}! Thank you for being with us. Here\'s to more good times ahead!', target_type: 'group', target_tag: 'all', stagger_seconds: 5 } },
+    ],
+  },
+  {
+    id: 'daily_promo',
+    name: 'Daily Promotional Offer',
+    description: 'Broadcast a daily deal to all contacts every afternoon',
+    emoji: '🔥',
+    category: 'Marketing',
+    trigger_type: 'schedule',
+    trigger_config: { cron: '0 12 * * *' },
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: '🔥 Today\'s special, {{name}}! Enjoy an exclusive discount — valid today only. Reply DEAL to grab yours before it\'s gone!', target_type: 'group', target_tag: 'all', stagger_seconds: 5 } },
+    ],
+  },
+  {
+    id: 'weekly_campaign',
+    name: 'Weekly Marketing Campaign',
+    description: 'Send a weekly newsletter-style update to your contact list',
+    emoji: '📣',
+    category: 'Marketing',
+    trigger_type: 'schedule',
+    trigger_config: { cron: '0 10 * * 1' },
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: '📣 Hi {{name}}, here\'s what\'s new this week! Check out our latest updates, offers, and news. Reply STOP anytime to opt out.', target_type: 'group', target_tag: 'all', stagger_seconds: 5 } },
+    ],
+  },
+  {
+    id: 'abandoned_cart',
+    name: 'Abandoned Cart Reminder',
+    description: 'Nudge a customer who left items in their cart (via webhook)',
+    emoji: '🛒',
+    category: 'E-commerce',
+    trigger_type: 'webhook_received',
+    trigger_config: {},
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}, you left some great items in your cart! 🛒 Complete your order before they sell out — need help checking out?' } },
+      { step_type: 'delay', step_order: 2, config: { seconds: 5 } },
+      { step_type: 'add_tag', step_order: 3, config: { tag: 'abandoned_cart' } },
+    ],
+  },
+  {
+    id: 'new_product_launch',
+    name: 'New Product Launch',
+    description: 'Announce a new product to your entire contact list',
+    emoji: '🚀',
+    category: 'Marketing',
+    trigger_type: 'manual',
+    trigger_config: {},
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: '🚀 Exciting news, {{name}}! We just launched something new. Check it out and be among the first to try it!', target_type: 'group', target_tag: 'all', stagger_seconds: 5 } },
+    ],
+  },
+  {
+    id: 'event_registration',
+    name: 'Event Registration Confirmation',
+    description: 'Confirm a contact\'s event registration (via webhook)',
+    emoji: '🎟️',
+    category: 'Events',
+    trigger_type: 'webhook_received',
+    trigger_config: {},
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}, you\'re registered! 🎟️ Event: your upcoming event on {{date}} at {{time}}. We\'ll send a reminder closer to the date.' } },
+      { step_type: 'add_tag', step_order: 2, config: { tag: 'event_registered' } },
+    ],
+  },
+  {
+    id: 'event_reminder',
+    name: 'Event Reminder',
+    description: 'Remind registered contacts a day before the event',
+    emoji: '⏰',
+    category: 'Events',
+    trigger_type: 'schedule',
+    trigger_config: { cron: '0 9 * * *' },
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}, just a reminder — your event is coming up on {{date}} at {{time}}. We can\'t wait to see you there!' } },
+    ],
+  },
+  {
+    id: 'course_enrollment',
+    name: 'Course Enrollment Welcome',
+    description: 'Welcome a student the moment they enroll (via webhook)',
+    emoji: '🎓',
+    category: 'Education',
+    trigger_type: 'webhook_received',
+    trigger_config: {},
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Welcome aboard, {{name}}! 🎓 You\'re now enrolled. Classes begin on {{date}} — we\'ll share your schedule and materials shortly.' } },
+      { step_type: 'add_tag', step_order: 2, config: { tag: 'student' } },
+    ],
+  },
+  {
+    id: 'attendance_reminder',
+    name: 'Attendance Reminder',
+    description: 'Remind students/attendees about class or session timing',
+    emoji: '📚',
+    category: 'Education',
+    trigger_type: 'schedule',
+    trigger_config: { cron: '0 8 * * 1-5' },
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}, reminder that your class/session starts today at {{time}}. See you there!' } },
+    ],
+  },
+  {
+    id: 'subscription_renewal',
+    name: 'Subscription Renewal Reminder',
+    description: 'Remind a customer their subscription is about to renew',
+    emoji: '🔔',
+    category: 'Utilities',
+    trigger_type: 'schedule',
+    trigger_config: { cron: '0 9 * * *' },
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}, your subscription is set to renew on {{date}}. Reply here if you\'d like to make any changes before then.' } },
+    ],
+  },
+  {
+    id: 'membership_expiry',
+    name: 'Membership Expiry Alert',
+    description: 'Alert members before their membership expires',
+    emoji: '⚠️',
+    category: 'Utilities',
+    trigger_type: 'schedule',
+    trigger_config: { cron: '0 9 * * *' },
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}, your membership is expiring on {{date}}. Renew now to keep enjoying all your benefits without interruption.' } },
+      { step_type: 'add_tag', step_order: 2, config: { tag: 'expiry_notified' } },
+    ],
+  },
+  {
+    id: 'restaurant_booking',
+    name: 'Restaurant Table Booking Confirmation',
+    description: 'Confirm a table reservation the moment it\'s booked (via webhook)',
+    emoji: '🍽️',
+    category: 'Restaurant',
+    trigger_type: 'webhook_received',
+    trigger_config: {},
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}, your table is confirmed for {{date}} at {{time}}! 🍽️ We look forward to hosting you. Reply CANCEL if your plans change.' } },
+      { step_type: 'add_tag', step_order: 2, config: { tag: 'reservation' } },
+    ],
+  },
+  {
+    id: 'hotel_booking',
+    name: 'Hotel Booking Confirmation',
+    description: 'Confirm a hotel/room booking the moment it\'s made (via webhook)',
+    emoji: '🏨',
+    category: 'Real Estate',
+    trigger_type: 'webhook_received',
+    trigger_config: {},
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}, your booking is confirmed! 🏨 Check-in: {{date}}. We\'ve saved your room and look forward to your stay.' } },
+      { step_type: 'add_tag', step_order: 2, config: { tag: 'guest' } },
+    ],
+  },
+  {
+    id: 'doctor_appointment',
+    name: 'Doctor Appointment Confirmation',
+    description: 'Confirm a patient\'s appointment the moment it\'s booked (via webhook)',
+    emoji: '🩺',
+    category: 'Healthcare',
+    trigger_type: 'webhook_received',
+    trigger_config: {},
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}, your appointment is confirmed for {{date}} at {{time}}. 🩺 Please arrive 10 minutes early. Reply RESCHEDULE if you need a new time.' } },
+      { step_type: 'add_tag', step_order: 2, config: { tag: 'patient' } },
+    ],
+  },
+  {
+    id: 'delivery_status',
+    name: 'Delivery Status Notification',
+    description: 'Notify a customer their order is out for delivery (via webhook)',
+    emoji: '📬',
+    category: 'E-commerce',
+    trigger_type: 'webhook_received',
+    trigger_config: {},
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}, your order {{order_id}} is out for delivery today! 📬 Please make sure someone\'s available to receive it.' } },
+      { step_type: 'log', step_order: 2, config: { message: 'Delivery notification sent for order {{order_id}} to {{name}}' } },
+    ],
+  },
+  {
+    id: 'complaint_registration',
+    name: 'Complaint Registration',
+    description: 'Acknowledge and tag complaints the moment they come in',
+    emoji: '🚨',
+    category: 'Support',
+    trigger_type: 'keyword_pattern',
+    trigger_config: { pattern: 'complaint|complain|issue|problem', match_mode: 'regex' },
+    cooldown_minutes: 30,
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}, we\'re sorry to hear about the trouble. 🚨 Your complaint has been logged and our team will follow up with you shortly.' } },
+      { step_type: 'add_tag', step_order: 2, config: { tag: 'complaint' } },
+      { step_type: 'log', step_order: 3, config: { message: 'Complaint registered for {{name}} ({{phone}})' } },
+    ],
+  },
+  {
+    id: 'internal_team_notification',
+    name: 'Internal Team Notification',
+    description: 'Notify your team\'s WhatsApp group when a key event happens (via webhook)',
+    emoji: '📢',
+    category: 'HR',
+    trigger_type: 'webhook_received',
+    trigger_config: {},
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: '📢 Team update: a new event just happened ({{event}}). Check the dashboard for details.' } },
+      { step_type: 'log', step_order: 2, config: { message: 'Internal notification sent to the team' } },
+    ],
+  },
+  {
+    id: 'hr_interview_invite',
+    name: 'HR Interview Invitation',
+    description: 'Invite a candidate to interview the moment they\'re shortlisted (via webhook)',
+    emoji: '🗓️',
+    category: 'HR',
+    trigger_type: 'webhook_received',
+    trigger_config: {},
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}, congratulations! 🗓️ You\'ve been shortlisted for an interview on {{date}} at {{time}}. Please confirm your availability by replying YES.' } },
+      { step_type: 'add_tag', step_order: 2, config: { tag: 'interview_invited' } },
+    ],
+  },
+  {
+    id: 'job_application_confirm',
+    name: 'Job Application Confirmation',
+    description: 'Confirm receipt of a job application the moment it\'s submitted (via webhook)',
+    emoji: '💼',
+    category: 'HR',
+    trigger_type: 'webhook_received',
+    trigger_config: {},
+    steps: [
+      { step_type: 'send_message', step_order: 1, config: { message: 'Hi {{name}}, thank you for applying! 💼 We\'ve received your application and our team will review it. We\'ll be in touch soon.' } },
+      { step_type: 'add_tag', step_order: 2, config: { tag: 'applicant' } },
+    ],
+  },
 ]
+
+const TEMPLATE_CATEGORIES = ['All', ...Array.from(new Set(TEMPLATES.map(t => t.category))).sort()]
 
 // ─── Trigger meta ─────────────────────────────────────────────
 const TRIGGER_META = {
@@ -873,65 +1270,193 @@ function stepSummaryText(step) {
 // ─── Templates Modal ──────────────────────────────────────────
 function TemplatesModal({ onClose, onInstall }) {
   const [installing, setInstalling] = useState(null)
+  const [category, setCategory] = useState('All')
+  const [search, setSearch] = useState('')
+  const [previewTpl, setPreviewTpl] = useState(null)
 
   const install = async (tpl) => {
     setInstalling(tpl.id)
     try {
-      const { id: _id, emoji: _e, ...payload } = tpl
+      const { id: _id, emoji: _e, category: _c, ...payload } = tpl
       await automationsApi.create(payload)
       onInstall()
     } catch { } finally { setInstalling(null) }
   }
 
+  const filtered = TEMPLATES.filter(tpl => {
+    if (category !== 'All' && tpl.category !== category) return false
+    if (!search.trim()) return true
+    const q = search.trim().toLowerCase()
+    return tpl.name.toLowerCase().includes(q) || tpl.description.toLowerCase().includes(q) || tpl.category.toLowerCase().includes(q)
+  })
+
+  const renderCard = (tpl) => (
+    <div key={tpl.id} style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-lg)', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        <span style={{ fontSize: 26, lineHeight: 1 }}>{tpl.emoji}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)' }}>{tpl.name}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{tpl.description}</div>
+        </div>
+      </div>
+      {/* Category + trigger + cooldown badges */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <span className="badge badge-gray">{tpl.category}</span>
+        <span style={{ background: `${TRIGGER_META[tpl.trigger_type]?.color || 'var(--accent-primary)'}18`, color: TRIGGER_META[tpl.trigger_type]?.color || 'var(--accent-primary)', border: `1px solid ${TRIGGER_META[tpl.trigger_type]?.color || 'var(--accent-primary)'}33`, borderRadius: 4, padding: '2px 7px', fontSize: 10, fontWeight: 700 }}>
+          {TRIGGER_META[tpl.trigger_type]?.label || tpl.trigger_type}
+        </span>
+        {tpl.cooldown_minutes > 0 && <span className="badge badge-gray">{tpl.cooldown_minutes}m cooldown</span>}
+      </div>
+
+      {/* Plain-text step list */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {tpl.steps.map((s, i) => (
+          <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <span style={{ minWidth: 18, height: 18, borderRadius: '50%', background: STEP_META[s.step_type]?.color ? `${STEP_META[s.step_type].color}22` : 'var(--bg-secondary)', color: STEP_META[s.step_type]?.color || 'var(--text-muted)', fontSize: 10, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>
+              {i + 1}
+            </span>
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.4 }}>{stepSummaryText(s)}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={() => setPreviewTpl(tpl)}
+          style={{ flexShrink: 0 }}
+        >
+          Preview
+        </button>
+        <button
+          className="btn btn-primary btn-sm"
+          onClick={() => install(tpl)}
+          disabled={installing === tpl.id}
+          style={{ flex: 1 }}
+        >
+          {installing === tpl.id ? 'Installing...' : <><Check size={13} /> Use Template</>}
+        </button>
+      </div>
+    </div>
+  )
+
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal" style={{ maxWidth: 700, maxHeight: '88vh', overflowY: 'auto' }}>
+      <div className="modal" style={{ maxWidth: 900, maxHeight: '88vh', overflowY: 'auto' }}>
         <div className="modal-header">
           <h3 className="modal-title"><BookOpen size={16} style={{ marginRight: 6 }} />Templates Library</h3>
           <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={18} /></button>
         </div>
-        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14 }}>
           Install a pre-built automation with one click. You can edit it after installing.
         </p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
-          {TEMPLATES.map(tpl => (
-            <div key={tpl.id} style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-lg)', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                <span style={{ fontSize: 26, lineHeight: 1 }}>{tpl.emoji}</span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)' }}>{tpl.name}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{tpl.description}</div>
+
+        {/* Search + category filter */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
+          <div className="search-bar">
+            <Search size={14} className="search-bar-icon" />
+            <input
+              className="form-input"
+              placeholder="Search templates by name, description, or category..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ paddingLeft: 36 }}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {TEMPLATE_CATEGORIES.map(cat => (
+              <button
+                key={cat}
+                type="button"
+                className={category === cat ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
+                onClick={() => setCategory(cat)}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {filtered.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-state-icon"><BookOpen size={28} /></div>
+            <div className="empty-state-title">No templates match</div>
+            <div className="empty-state-desc">Try a different search term or category.</div>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
+            {filtered.map(renderCard)}
+          </div>
+        )}
+      </div>
+
+      {previewTpl && (
+        <TemplatePreviewModal
+          tpl={previewTpl}
+          onClose={() => setPreviewTpl(null)}
+          onInstall={() => { setPreviewTpl(null); install(previewTpl) }}
+          installing={installing === previewTpl.id}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Template Preview Modal ───────────────────────────────────
+function TemplatePreviewModal({ tpl, onClose, onInstall, installing }) {
+  const triggerMeta = TRIGGER_META[tpl.trigger_type] || TRIGGER_META.manual
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 560, maxHeight: '85vh', overflowY: 'auto' }}>
+        <div className="modal-header">
+          <h3 className="modal-title">{tpl.emoji} {tpl.name}</h3>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={18} /></button>
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>{tpl.description}</p>
+
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 18 }}>
+          <span className="badge badge-gray">{tpl.category}</span>
+          <span style={{ background: `${triggerMeta.color}18`, color: triggerMeta.color, border: `1px solid ${triggerMeta.color}33`, borderRadius: 4, padding: '2px 7px', fontSize: 10, fontWeight: 700 }}>
+            {triggerMeta.label}
+          </span>
+          {tpl.cooldown_minutes > 0 && <span className="badge badge-gray">{tpl.cooldown_minutes}m cooldown</span>}
+        </div>
+
+        <div style={{ fontWeight: 700, fontSize: 12, color: 'var(--text-primary)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          Workflow ({tpl.steps.length} step{tpl.steps.length !== 1 ? 's' : ''})
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+          {tpl.steps.map((s, i) => {
+            const meta = STEP_META[s.step_type] || STEP_META.log
+            const Icon = meta.icon
+            return (
+              <div key={i} style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-md)', padding: '10px 12px', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                <div style={{ width: 26, height: 26, borderRadius: 8, background: `${meta.color}20`, color: meta.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Icon size={13} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Step {i + 1}: {meta.label}</div>
+                  {s.config?.message && (
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{s.config.message}</div>
+                  )}
+                  {!s.config?.message && (
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{stepSummaryText(s)}</div>
+                  )}
                 </div>
               </div>
-              {/* Trigger + cooldown badges */}
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                <span style={{ background: `${TRIGGER_META[tpl.trigger_type]?.color || 'var(--accent-primary)'}18`, color: TRIGGER_META[tpl.trigger_type]?.color || 'var(--accent-primary)', border: `1px solid ${TRIGGER_META[tpl.trigger_type]?.color || 'var(--accent-primary)'}33`, borderRadius: 4, padding: '2px 7px', fontSize: 10, fontWeight: 700 }}>
-                  {TRIGGER_META[tpl.trigger_type]?.label || tpl.trigger_type}
-                </span>
-                {tpl.cooldown_minutes > 0 && <span className="badge badge-gray">{tpl.cooldown_minutes}m cooldown</span>}
-              </div>
+            )
+          })}
+        </div>
 
-              {/* Plain-text step list */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {tpl.steps.map((s, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                    <span style={{ minWidth: 18, height: 18, borderRadius: '50%', background: STEP_META[s.step_type]?.color ? `${STEP_META[s.step_type].color}22` : 'var(--bg-secondary)', color: STEP_META[s.step_type]?.color || 'var(--text-muted)', fontSize: 10, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>
-                      {i + 1}
-                    </span>
-                    <span style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.4 }}>{stepSummaryText(s)}</span>
-                  </div>
-                ))}
-              </div>
-              <button
-                className="btn btn-primary btn-sm"
-                onClick={() => install(tpl)}
-                disabled={installing === tpl.id}
-                style={{ width: '100%' }}
-              >
-                {installing === tpl.id ? 'Installing...' : <><Check size={13} /> Install</>}
-              </button>
-            </div>
-          ))}
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 18 }}>
+          Fully editable after installing — variables like <code>{'{{name}}'}</code>, <code>{'{{phone}}'}</code>, <code>{'{{order_id}}'}</code>, <code>{'{{date}}'}</code>, <code>{'{{time}}'}</code> resolve automatically at send time.
+        </div>
+
+        <div className="modal-footer">
+          <button type="button" className="btn btn-secondary" onClick={onClose}>Back</button>
+          <button type="button" className="btn btn-primary" onClick={onInstall} disabled={installing}>
+            {installing ? 'Installing...' : <><Check size={14} /> Use This Template</>}
+          </button>
         </div>
       </div>
     </div>

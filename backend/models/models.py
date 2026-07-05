@@ -4,7 +4,7 @@ SQLAlchemy ORM Models for WhatsApp Automate
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean, DateTime,
-    Float, ForeignKey, Enum, JSON, Index
+    Float, ForeignKey, Enum, JSON, Index, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 from database.connection import Base
@@ -156,6 +156,9 @@ class Contact(Base):
         Index("idx_contact_valid", "is_valid"),
         Index("idx_contact_wa_account", "wa_account"),
         Index("idx_contact_user", "user_id"),
+        # Scoped by user_id — the same phone/group under the same wa_account
+        # legitimately exists as separate rows for two different users.
+        UniqueConstraint("user_id", "phone", "wa_account", name="uq_contact_user_phone_account"),
     )
 
 
