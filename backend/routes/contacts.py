@@ -83,13 +83,14 @@ async def sync_contacts(background_tasks: BackgroundTasks, db: Session = Depends
 
 
 @router.get("/sync-progress")
-async def sync_progress(request: Request, user_id: int = Query(...), token: str = Query(...)):
+async def sync_progress(request: Request, user_id: int = Query(...), ticket: str = Query(...)):
     """SSE endpoint — streams contact sync progress in real time.
-    Public (EventSource can't send auth headers), so the caller's JWT is
-    passed as a query param instead and verified against user_id."""
-    from services.auth_service import user_id_from_token
-    if user_id_from_token(token) != user_id:
-        raise HTTPException(status_code=401, detail="Invalid or mismatched token")
+    Public (EventSource can't send auth headers), so the caller passes a
+    short-lived, stream-scoped ticket (GET /auth/stream-ticket) instead of
+    the main JWT."""
+    from services.auth_service import user_id_from_stream_ticket
+    if user_id_from_stream_ticket(ticket) != user_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired stream ticket")
 
     async def generator():
         while True:

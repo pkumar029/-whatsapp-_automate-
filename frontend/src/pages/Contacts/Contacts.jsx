@@ -178,7 +178,7 @@ export default function Contacts() {
       await contactsApi.sync()
 
       // Subscribe to SSE progress stream
-      const es = new EventSource(contactsApi.syncProgressUrl(user.id))
+      const es = new EventSource(await contactsApi.syncProgressUrl(user.id))
       syncEsRef.current = es
 
       es.onmessage = (evt) => {

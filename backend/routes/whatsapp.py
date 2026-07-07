@@ -24,16 +24,17 @@ async def get_status(db: Session = Depends(get_db), user_id: int = Depends(curre
 
 
 @router.get("/events")
-async def whatsapp_events(request: Request, user_id: int = Query(...), token: str = Query(...)):
+async def whatsapp_events(request: Request, user_id: int = Query(...), ticket: str = Query(...)):
     """SSE stream — proxies real-time bridge events so the frontend login flow
     gets instant QR, connected, and disconnected notifications without polling.
-    Public (EventSource can't send auth headers), so the caller's JWT is passed
-    as a query param instead and verified against user_id — this stream exposes
-    QR codes / pairing codes, so a spoofable user_id would let anyone hijack
-    another user's WhatsApp linking."""
-    from services.auth_service import user_id_from_token
-    if user_id_from_token(token) != user_id:
-        raise HTTPException(status_code=401, detail="Invalid or mismatched token")
+    Public (EventSource can't send auth headers), so the caller passes a
+    short-lived, stream-scoped ticket (GET /auth/stream-ticket) instead of the
+    main JWT — this stream exposes QR codes / pairing codes, so a spoofable
+    user_id would let anyone hijack another user's WhatsApp linking, and the
+    main long-lived JWT should never sit in a URL that proxies/browsers log."""
+    from services.auth_service import user_id_from_stream_ticket
+    if user_id_from_stream_ticket(ticket) != user_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired stream ticket")
 
     async def generator():
         # Send current bridge state immediately on connect

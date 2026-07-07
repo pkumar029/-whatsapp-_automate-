@@ -532,16 +532,13 @@ sessionRouter.post('/send', async (req, res) => {
             msg = await s.client.sendMessage(jid, message);
         } catch (sendErr) {
             // "No LID for user" means WhatsApp needs the @lid JID, not @c.us.
-            // Re-resolve without filtering and retry once.
+            // Re-resolving via getNumberId() here just returns the same @c.us
+            // id that already failed — go straight to @lid instead.
             if (sendErr.message && sendErr.message.includes('No LID')) {
                 const raw = jid.replace(/@\S+$/, '');
-                const numberId = await s.client.getNumberId(raw);
-                if (numberId && numberId._serialized && numberId._serialized !== jid) {
-                    console.log(`LID retry: ${jid} → ${numberId._serialized}`);
-                    msg = await s.client.sendMessage(numberId._serialized, message);
-                } else {
-                    throw sendErr;
-                }
+                const lidJid = `${raw}@lid`;
+                console.log(`LID retry: ${jid} → ${lidJid}`);
+                msg = await s.client.sendMessage(lidJid, message);
             } else {
                 throw sendErr;
             }

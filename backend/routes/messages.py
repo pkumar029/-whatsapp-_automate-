@@ -32,15 +32,16 @@ def broadcast_message_event(user_id: int, data: dict) -> None:
             pass
 
 @router.get("/stream")
-async def message_stream(request: Request, user_id: int = Query(...), token: str = Query(...)):
+async def message_stream(request: Request, user_id: int = Query(...), ticket: str = Query(...)):
     """Server-Sent Events endpoint — pushes new inbound messages in real-time.
-    Public (EventSource can't send auth headers), so the caller's JWT is passed
-    as a query param instead and verified against user_id — without this check
-    anyone could pass an arbitrary user_id and read another user's message
-    content live."""
-    from services.auth_service import user_id_from_token
-    if user_id_from_token(token) != user_id:
-        raise HTTPException(status_code=401, detail="Invalid or mismatched token")
+    Public (EventSource can't send auth headers), so the caller passes a
+    short-lived, stream-scoped ticket (GET /auth/stream-ticket) instead of the
+    main JWT — without this check anyone could pass an arbitrary user_id and
+    read another user's message content live, and the main long-lived JWT
+    should never sit in a URL that proxies/browsers log."""
+    from services.auth_service import user_id_from_stream_ticket
+    if user_id_from_stream_ticket(ticket) != user_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired stream ticket")
     queue: asyncio.Queue = asyncio.Queue(maxsize=100)
     _sse_queues.setdefault(user_id, []).append(queue)
 

@@ -79,6 +79,19 @@ async def logout():
     return {"success": True, "message": "Logged out"}
 
 
+@router.get("/stream-ticket")
+async def stream_ticket(request: Request):
+    """Mint a short-lived (60s), stream-scoped ticket for opening one SSE
+    connection. Requires the real JWT via the Authorization header — the
+    ticket returned here is what goes in the EventSource URL instead, so the
+    long-lived account credential never appears in a URL/log/browser history."""
+    from services.auth_service import create_stream_ticket
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return {"ticket": create_stream_ticket(user_id)}
+
+
 @router.get("/me")
 async def get_me(request: Request, db: Session = Depends(get_db)):
     """Return the currently authenticated user's profile."""

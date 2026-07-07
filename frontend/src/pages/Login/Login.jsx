@@ -185,33 +185,38 @@ export default function Login() {
       fallbackTimer = setTimeout(poll, 1500)
     }
 
-    es = new EventSource(whatsappApi.eventsUrl(user.id))
-
-    es.onmessage = (evt) => {
+    whatsappApi.eventsUrl(user.id).then(url => {
       if (cancelled) return
-      try {
-        const data = JSON.parse(evt.data)
-        const bs = data.bridge_status || data.status
+      es = new EventSource(url)
 
-        if (data.qr || data.pairing_code) {
-          if (data.qr) setQrCode(data.qr)
-          if (data.pairing_code) setPairingCode(data.pairing_code)
-          setConnectionStep(s => s === 'launching' ? 'qr' : s)
-        }
-        if (data.type === 'authenticated') setConnectionStep('authenticated')
-        if (bs === 'connected' || data.type === 'connected') onConnected()
-        if (data.type === 'info' && data.message) setMessage(data.message)
-        if ((data.type === 'disconnected' || data.type === 'error') && !didConnectRef.current) {
-          setErrorMsg(data.message || data.reason || '❌ Unable to connect to WhatsApp. Please try again.')
-          setView('method')
-        }
-      } catch (_) {}
-    }
+      es.onmessage = (evt) => {
+        if (cancelled) return
+        try {
+          const data = JSON.parse(evt.data)
+          const bs = data.bridge_status || data.status
 
-    es.onerror = () => {
-      if (es) { try { es.close() } catch (_) {} ; es = null }
-      startFallback()
-    }
+          if (data.qr || data.pairing_code) {
+            if (data.qr) setQrCode(data.qr)
+            if (data.pairing_code) setPairingCode(data.pairing_code)
+            setConnectionStep(s => s === 'launching' ? 'qr' : s)
+          }
+          if (data.type === 'authenticated') setConnectionStep('authenticated')
+          if (bs === 'connected' || data.type === 'connected') onConnected()
+          if (data.type === 'info' && data.message) setMessage(data.message)
+          if ((data.type === 'disconnected' || data.type === 'error') && !didConnectRef.current) {
+            setErrorMsg(data.message || data.reason || '❌ Unable to connect to WhatsApp. Please try again.')
+            setView('method')
+          }
+        } catch (_) {}
+      }
+
+      es.onerror = () => {
+        if (es) { try { es.close() } catch (_) {} ; es = null }
+        startFallback()
+      }
+    }).catch(() => {
+      if (!cancelled) startFallback()
+    })
 
     return () => {
       cancelled = true

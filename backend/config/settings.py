@@ -1,7 +1,7 @@
 """
 WhatsApp Automate — Application Configuration
 """
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
 
@@ -44,10 +44,17 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/app.log"
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
+    # extra="ignore" — production .env files carry forward-looking keys
+    # (rate limiting, refresh tokens, etc.) that don't have a Settings field
+    # yet. pydantic-settings defaults to extra="forbid", which was crashing
+    # the app on every startup the moment the .env had any key this class
+    # didn't declare — that's what produced PM2's endless restart loop.
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore",
+    )
 
 
 settings = Settings()

@@ -173,10 +173,19 @@ export function AppProvider({ children }) {
     let reconnectTimer = null
     let cancelled = false
 
-    const connect = () => {
+    const connect = async () => {
       if (cancelled) return
+      let url
       try {
-        es = new EventSource(whatsappApi.eventsUrl(user.id))
+        url = await whatsappApi.eventsUrl(user.id)
+      } catch {
+        if (!cancelled) reconnectTimer = setTimeout(connect, 8000)
+        return
+      }
+      if (cancelled) return
+
+      try {
+        es = new EventSource(url)
       } catch {
         reconnectTimer = setTimeout(connect, 8000)
         return

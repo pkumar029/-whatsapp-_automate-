@@ -442,12 +442,17 @@ export default function Dashboard() {
   // SSE: refresh immediately when a new inbound message arrives
   useEffect(() => {
     if (sessionStatus.status !== 'connected' || !user) return
-    const es = new EventSource(messagesApi.streamUrl(user.id))
-    es.onmessage = (e) => {
-      try { if (JSON.parse(e.data).type === 'new_message') fetchData() } catch {}
-    }
-    es.onerror = () => {}
-    return () => es.close()
+    let es = null
+    let cancelled = false
+    messagesApi.streamUrl(user.id).then(url => {
+      if (cancelled) return
+      es = new EventSource(url)
+      es.onmessage = (e) => {
+        try { if (JSON.parse(e.data).type === 'new_message') fetchData() } catch {}
+      }
+      es.onerror = () => {}
+    }).catch(() => {})
+    return () => { cancelled = true; if (es) es.close() }
   }, [sessionStatus.status, fetchData, user])
 
   const displayStatus = sessionStatus || { status: 'disconnected' }

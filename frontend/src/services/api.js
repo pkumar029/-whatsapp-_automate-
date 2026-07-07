@@ -5,9 +5,17 @@ export const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7
 const ORIGIN_URL = BASE_URL.replace(/\/api\/v1\/?$/, '')
 
 // EventSource can't send an Authorization header, so these public SSE
-// endpoints take the JWT as a query param instead — the backend verifies it
-// matches user_id before streaming anything (see routes/*.py SSE handlers).
-const authQuery = () => `token=${encodeURIComponent(localStorage.getItem('wa_token') || '')}`
+// endpoints take a short-lived, stream-scoped ticket as a query param instead
+// of the real (365-day) JWT — a ticket is dead within 60s and only ever good
+// for opening a stream, so a URL that leaks into a proxy/server log or
+// browser history exposes far less than the account's real credential would.
+// Fetched fresh via GET /auth/stream-ticket (sent with the normal
+// Authorization header, so it never appears in a URL itself).
+async function buildStreamUrl(path, params = {}) {
+  const res = await api.get('/auth/stream-ticket')
+  const qs = new URLSearchParams({ ...params, ticket: res.data.ticket }).toString()
+  return `${BASE_URL}${path}?${qs}`
+}
 
 // ─── Axios Instance ─────────────────────────────────────────
 const api = axios.create({
@@ -55,7 +63,7 @@ export const whatsappApi = {
   getProfile: () => api.get('/whatsapp/profile'),
   // Public SSE endpoint (EventSource can't send auth headers) — backend
   // requires user_id as a query param instead.
-  eventsUrl: (userId) => `${BASE_URL}/whatsapp/events?user_id=${userId}&${authQuery()}`,
+  eventsUrl: (userId) => buildStreamUrl('/whatsapp/events', { user_id: userId }),
 }
 
 // ─── Contacts API ─────────────────────────────────────────────
@@ -69,7 +77,7 @@ export const contactsApi = {
   sync: () => api.post('/contacts/sync'),
   // Public SSE endpoint (EventSource can't send auth headers) — backend
   // requires user_id as a query param instead.
-  syncProgressUrl: (userId) => `${BASE_URL}/contacts/sync-progress?user_id=${userId}&${authQuery()}`,
+  syncProgressUrl: (userId) => buildStreamUrl('/contacts/sync-progress', { user_id: userId }),
   getChats: () => api.get('/contacts/chats'),
   getGroupMembers: (id) => api.get(`/contacts/${id}/group-members`),
   getProfilePic: (id) => api.get(`/contacts/${id}/profile-pic`),
@@ -91,7 +99,7 @@ export const messagesApi = {
   checkGrammar: (data) => api.post('/messages/check-grammar', data),
   // Public SSE endpoint (EventSource can't send auth headers) — backend
   // requires user_id as a query param instead.
-  streamUrl: (userId) => `${BASE_URL}/messages/stream?user_id=${userId}&${authQuery()}`,
+  streamUrl: (userId) => buildStreamUrl('/messages/stream', { user_id: userId }),
 }
 
 // ─── Automations API ─────────────────────────────────────────

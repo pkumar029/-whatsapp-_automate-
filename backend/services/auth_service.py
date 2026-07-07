@@ -33,16 +33,30 @@ def decode_token(token: str) -> dict:
         raise ValueError(str(e))
 
 
-def user_id_from_token(token: str):
-    """Decode a JWT and return its subject user id, or None if invalid/expired.
+STREAM_TICKET_TTL_SECONDS = 60
 
-    Used by the public SSE endpoints (EventSource can't send an Authorization
-    header) to verify the caller-supplied user_id actually matches a valid
-    token for that user — without this, any client could pass an arbitrary
-    user_id and read another user's live message/WhatsApp/contact-sync events.
-    """
+
+def create_stream_ticket(user_id: int) -> str:
+    """Mint a short-lived, single-purpose ticket for opening one SSE
+    connection. EventSource can't send an Authorization header, so the main
+    (365-day) JWT would otherwise have to go in the URL — which proxies,
+    servers, and browsers all log/retain. A ticket that's dead within a
+    minute and only ever usable for streaming is a much smaller thing to
+    leak than the account's real, long-lived credential."""
+    expires = datetime.now(timezone.utc) + timedelta(seconds=STREAM_TICKET_TTL_SECONDS)
+    payload = {"sub": str(user_id), "scope": "stream", "exp": expires, "iat": datetime.now(timezone.utc)}
+    return jwt.encode(payload, settings.JWT_SECRET, algorithm="HS256")
+
+
+def user_id_from_stream_ticket(ticket: str):
+    """Decode a stream ticket and return its subject user id, or None if
+    invalid/expired/wrong scope. The SSE endpoints accept ONLY tickets from
+    here — never the main JWT — so a leaked stream URL exposes at most a
+    minute of read access to one stream, not the whole account."""
     try:
-        payload = decode_token(token)
+        payload = decode_token(ticket)
+        if payload.get("scope") != "stream":
+            return None
         return int(payload["sub"])
     except Exception:
         return None
