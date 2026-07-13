@@ -470,6 +470,12 @@ sessionRouter.post('/connect', async (req, res) => {
     if (s.clientStatus === 'connected') {
         return res.json({ success: true, message: 'Already connected', phone: s.connectedPhone });
     }
+    // Guard against double-init: a retry (or double-click) while the browser
+    // is still launching would otherwise destroy() a mid-launch client and
+    // race a fresh one in, producing "browser already running" errors.
+    if (s.clientStatus === 'connecting') {
+        return res.json({ success: true, message: 'Initialization already in progress' });
+    }
     const { phone, linkMethod } = req.body;
     await initClient(s, phone, linkMethod);
     res.json({ success: true, message: 'Initialization started' });
